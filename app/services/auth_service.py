@@ -1,0 +1,46 @@
+import uuid
+from datetime import datetime, timezone
+from fastapi import HTTPException, status
+from app.core.database import db
+from app.core.security import get_password_hash, verify_password, create_access_token
+from app.schemas.auth import LoginRequest, Token
+from app.schemas.user import UserCreate, UserRegisterResponse
+
+class AuthService:
+    @staticmethod
+    async def register_user(user_in: UserCreate) -> UserRegisterResponse:
+        email_lower = user_in.email.lower()
+        existing_user = await db.users_collection.find_one({"email": email_lower})
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User with this email already exists"
+            )
+        
+        user_id = str(uuid.uuid4())
+        hashed_password = get_password_hash(user_in.password)
+        
+        user_doc = {
+            "_id": user_id,
+            "username": user_in.username,
+            "email": email_lower,
+            "password": hashed_password,
+            "created_at": datetime.now(timezone.utc)
+        }
+        
+        await db.users_collection.insert_one(user_doc)
+        return UserRegisterResponse(message="User created successfully")
+
+    @staticmethod
+    async def authenticate_user(login_in: LoginRequest) -> Token:
+        email_lower = login_in.email.lower()
+        user = await db.users_collection.find_one({"email": email_lower})
+        if not user or not verify_password(login_in.password, user["password"]):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        access_token = create_access_token(subject=user["_id"])
+        return Token(access_token=access_token)
