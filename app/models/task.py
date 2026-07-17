@@ -6,6 +6,8 @@ class TaskDB(BaseModel):
     title: str
     completed: bool
     priority: int
+    description: str | None = None
+    due_date: datetime | None = None
     created_at: datetime
     updated_at: datetime
     owner_id: str

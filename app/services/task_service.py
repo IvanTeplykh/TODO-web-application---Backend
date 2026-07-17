@@ -18,6 +18,8 @@ class TaskService:
             "title": task_in.title,
             "completed": False,
             "priority": task_in.priority,
+            "description": task_in.description,
+            "due_date": task_in.due_date,
             "created_at": now,
             "updated_at": now,
             "owner_id": str(owner_id)
@@ -30,6 +32,8 @@ class TaskService:
             title=task_doc["title"],
             completed=task_doc["completed"],
             priority=task_doc["priority"],
+            description=task_doc.get("description"),
+            due_date=task_doc.get("due_date"),
             created_at=task_doc["created_at"],
             updated_at=task_doc["updated_at"],
             owner_id=UUID(task_doc["owner_id"])
@@ -74,6 +78,8 @@ class TaskService:
                 title=doc["title"],
                 completed=doc["completed"],
                 priority=doc["priority"],
+                description=doc.get("description"),
+                due_date=doc.get("due_date"),
                 created_at=doc["created_at"],
                 updated_at=doc["updated_at"],
                 owner_id=UUID(doc["owner_id"])
@@ -108,6 +114,8 @@ class TaskService:
             title=task["title"],
             completed=task["completed"],
             priority=task["priority"],
+            description=task.get("description"),
+            due_date=task.get("due_date"),
             created_at=task["created_at"],
             updated_at=task["updated_at"],
             owner_id=UUID(task["owner_id"])
@@ -132,6 +140,8 @@ class TaskService:
             "title": task_in.title,
             "priority": task_in.priority,
             "completed": task_in.completed,
+            "description": task_in.description,
+            "due_date": task_in.due_date,
             "updated_at": datetime.now(timezone.utc)
         }
         
@@ -143,6 +153,8 @@ class TaskService:
             title=updated_task["title"],
             completed=updated_task["completed"],
             priority=updated_task["priority"],
+            description=updated_task.get("description"),
+            due_date=updated_task.get("due_date"),
             created_at=updated_task["created_at"],
             updated_at=updated_task["updated_at"],
             owner_id=UUID(updated_task["owner_id"])
@@ -176,6 +188,8 @@ class TaskService:
             title=updated_task["title"],
             completed=updated_task["completed"],
             priority=updated_task["priority"],
+            description=updated_task.get("description"),
+            due_date=updated_task.get("due_date"),
             created_at=updated_task["created_at"],
             updated_at=updated_task["updated_at"],
             owner_id=UUID(updated_task["owner_id"])
