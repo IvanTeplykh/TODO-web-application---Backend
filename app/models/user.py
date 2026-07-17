@@ -6,4 +6,5 @@ class UserDB(BaseModel):
     username: str
     email: str
     password: str
+    avatar_url: str | None = None
     created_at: datetime

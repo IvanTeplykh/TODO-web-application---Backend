@@ -37,5 +37,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     return UserResponse(
         id=UUID(user["_id"]),
         username=user["username"],
-        email=user["email"]
+        email=user["email"],
+        avatar_url=user.get("avatar_url")
     )

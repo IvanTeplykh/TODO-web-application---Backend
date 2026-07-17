@@ -25,6 +25,7 @@ class AuthService:
             "username": user_in.username,
             "email": email_lower,
             "password": hashed_password,
+            "avatar_url": None,
             "created_at": datetime.now(timezone.utc)
         }
         

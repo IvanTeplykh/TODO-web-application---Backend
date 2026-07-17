@@ -18,7 +18,7 @@ async def create_task(
 @router.get("", response_model=PaginatedResponse[TaskResponse])
 async def get_tasks(
     page: int = Query(1, ge=1),
-    limit: int = Query(10, ge=1, le=100),
+    limit: int = Query(10, ge=1, le=500),
     status: str = Query("all", pattern="^(all|done|undone)$"),
     search: str | None = Query(None),
     sort: str = Query("created_at"),
