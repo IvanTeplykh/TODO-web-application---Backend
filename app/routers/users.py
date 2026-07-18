@@ -47,6 +47,12 @@ async def change_password(
             detail="Incorrect current password"
         )
         
+    if data.current_password == data.new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from current password"
+        )
+        
     hashed_password = get_password_hash(data.new_password)
     
     await db.users_collection.update_one(
