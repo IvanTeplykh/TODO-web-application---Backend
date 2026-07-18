@@ -22,3 +22,8 @@ class UserUpdate(BaseModel):
 
 class UserRegisterResponse(BaseModel):
     message: str
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
