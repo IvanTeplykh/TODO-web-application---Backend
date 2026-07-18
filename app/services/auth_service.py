@@ -8,6 +8,12 @@ from app.schemas.user import UserCreate, UserRegisterResponse
 
 class AuthService:
     @staticmethod
+    async def check_email_exists(email: str) -> bool:
+        email_lower = email.lower()
+        existing_user = await db.users_collection.find_one({"email": email_lower})
+        return existing_user is not None
+
+    @staticmethod
     async def register_user(user_in: UserCreate) -> UserRegisterResponse:
         email_lower = user_in.email.lower()
         existing_user = await db.users_collection.find_one({"email": email_lower})
