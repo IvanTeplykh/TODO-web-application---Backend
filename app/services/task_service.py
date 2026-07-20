@@ -55,6 +55,9 @@ class TaskService:
             query["completed"] = True
         elif status_filter == "undone":
             query["completed"] = False
+        elif status_filter == "overdue":
+            query["completed"] = False
+            query["due_date"] = {"$ne": None, "$lt": datetime.now(timezone.utc)}
         
         if search:
             query["title"] = {"$regex": search, "$options": "i"}
@@ -63,12 +66,28 @@ class TaskService:
         
         sort_direction = 1 if order == "asc" else -1
         # Prevent injection or incorrect fields by defaulting to created_at
-        allowed_sort_fields = {"priority", "created_at", "updated_at", "title", "completed"}
+        allowed_sort_fields = {"priority", "created_at", "updated_at", "title", "completed", "due_date"}
         sort_field = sort if sort in allowed_sort_fields else "created_at"
         
         skip = (page - 1) * limit
-        cursor = db.tasks_collection.find(query).sort(sort_field, sort_direction).skip(skip).limit(limit)
-        task_docs = await cursor.to_list(length=limit)
+        
+        if sort_field == "due_date":
+            pipeline = [
+                {"$match": query},
+                {
+                    "$addFields": {
+                        "has_due_date": {"$cond": [{"$ne": ["$due_date", None]}, 1, 0]}
+                    }
+                },
+                {"$sort": {"has_due_date": -1, "due_date": sort_direction}},
+                {"$skip": skip},
+                {"$limit": limit}
+            ]
+            cursor = db.tasks_collection.aggregate(pipeline)
+            task_docs = await cursor.to_list(length=limit)
+        else:
+            cursor = db.tasks_collection.find(query).sort(sort_field, sort_direction).skip(skip).limit(limit)
+            task_docs = await cursor.to_list(length=limit)
         
         pages = math.ceil(total / limit) if total > 0 else 1
         
