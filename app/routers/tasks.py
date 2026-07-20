@@ -19,7 +19,7 @@ async def create_task(
 async def get_tasks(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=500),
-    status: str = Query("all", pattern="^(all|done|undone)$"),
+    status: str = Query("all", pattern="^(all|done|undone|overdue)$"),
     search: str | None = Query(None),
     sort: str = Query("created_at"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
