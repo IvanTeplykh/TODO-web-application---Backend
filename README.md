@@ -15,6 +15,7 @@ This project serves as the server-side (Backend) component of a web application 
   - JWT (JSON Web Tokens via python-jose) - Access token issuing and verification.
   - Bcrypt & Passlib - Secure password hashing and verification algorithms.
 - **ASGI Server**: Uvicorn - Lightning-fast ASGI server implementation.
+- **Testing Suite**: Pytest, Pytest-Asyncio, HTTPX, MongoMock-Motor.
 
 ---
 
@@ -32,6 +33,7 @@ The project follows a modular architecture separating concerns cleanly across mo
 - `app/schemas` - Pydantic models for request validation and response formatting.
 - `app/models` - Internal database entity data structures.
 - `app/utils` - Utility functions (pagination response formatters).
+- `tests` - Automated regression test suites and end-to-end user flow tests.
 
 ---
 
@@ -53,7 +55,7 @@ The project follows a modular architecture separating concerns cleanly across mo
   - Sorting: `sort` (`created_at`, `due_date`, `priority`), `order` (`asc`, `desc`).
 - `GET /api/v1/tasks/{task_id}` - Fetches a specific task by its UUID.
 - `PUT /api/v1/tasks/{task_id}` - Updates all details of a task.
-- `PATCH /api/v1/tasks/{task_id}/status` - Toggles task completion status (`is_completed`).
+- `PATCH /api/v1/tasks/{task_id}/status` - Toggles task completion status (`completed`).
 - `DELETE /api/v1/tasks/{task_id}` - Deletes a task by UUID.
 
 ### 3. User Profile (`/api/v1/users`)
@@ -65,6 +67,26 @@ The project follows a modular architecture separating concerns cleanly across mo
 FastAPI automatically generates interactive API documentation:
 - **Swagger UI**: `http://localhost:8000/docs`
 - **ReDoc**: `http://localhost:8000/redoc`
+
+---
+
+## Testing
+
+The backend includes automated regression suites and a complete End-to-End (E2E) user flow test. All tests execute against an isolated in-memory database mock (`mongomock-motor`), requiring no live MongoDB database connection.
+
+### Test Suites Structure
+- `tests/conftest.py`: Test environment setup, event loop policies, isolated database mock fixture, async HTTP client, and authenticated user fixtures.
+- `tests/test_auth.py`: Authentication API regression tests (registration, duplicate check, login, authorization, logout).
+- `tests/test_tasks.py`: Task management API regression tests (creation, validation limits, search, filtering, pagination, status toggles, deletion, and cross-user data isolation).
+- `tests/test_users.py`: User profile and security tests (profile updates, password verification, password changing).
+- `tests/test_e2e_user_flow.py`: Full End-to-End client user journey simulating registration, task lifecycle management, priority sorting, password updates, and session cleanup.
+
+### Running Tests
+Execute the pytest suite from the backend directory:
+
+```bash
+pytest -v
+```
 
 ---
 
