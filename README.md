@@ -1,77 +1,110 @@
 # TODO Web Application - Backend
 
-Цей проект є серверною частиною (Backend) веб-додатку для керування завданнями (TODO). Він реалізує RESTful API з автентифікацією користувачів та збереженням завдань.
+This project serves as the server-side (Backend) component of a web application designed for task management (TODO). It delivers a high-performance RESTful API with asynchronous request processing, JWT-based user authentication, MongoDB integration, and comprehensive data schema validation.
 
 ---
 
-## 🛠️ Стек технологій (Tech Stack)
+## Tech Stack
 
-*   **Мова програмування**: Python 3.10+
-*   **Веб-фреймворк**: **FastAPI** — для розробки високопродуктивного API.
-*   **Асинхронний драйвер бази даних**: **Motor** — асинхронний MongoDB драйвер для Python.
-*   **Валідація даних**: **Pydantic v2** — забезпечення безпеки типів та валідації запитів/відповідей.
-*   **База даних**: **MongoDB** (використовується хмарне рішення MongoDB Atlas).
-*   **Безпека та автентифікація**:
-    *   **JWT (JSON Web Tokens)** — авторизація за допомогою токенів доступу (access tokens).
-    *   **CryptContext (passlib & bcrypt)** — для надійного хешування та перевірки паролів користувачів.
-*   **Сервер виконання**: **Uvicorn** — асинхронний ASGI-сервер.
-
----
-
-## 🚀 Основні можливості (Features)
-
-1.  **Автентифікація та авторизація**:
-    *   Реєстрація користувачів (`/api/v1/auth/register`).
-    *   Вхід користувача з видачею JWT токена (`/api/v1/auth/login`).
-    *   Отримання профілю поточного користувача (`/api/v1/auth/me`).
-2.  **Керування завданнями (CRUD)**:
-    *   Створення завдання (`POST /api/v1/tasks`) з назвою (до 100 символів), описом, дедлайном (`due_date`) та пріоритетом (1-10).
-    *   Отримання пагінованого списку завдань поточного користувача (`GET /api/v1/tasks`) з можливістю пошуку, сортування та фільтрації за статусом.
-    *   Оновлення завдання (`PUT /api/v1/tasks/{id}`) та його статусу (`PATCH /api/v1/tasks/{id}/status`).
-    *   Видалення завдання (`DELETE /api/v1/tasks/{id}`).
-3.  **CORS**: Налаштоване Middleware для дозволу запитів з будь-яких джерел (`allow_origins=["*"]`).
-4.  **Автоматична документація**: Інтерактивний Swagger UI доступний за адресою `/docs`.
+- **Programming Language**: Python 3.10+
+- **Web Framework**: FastAPI - Asynchronous, high-performance web framework for building REST APIs.
+- **Async DB Driver**: Motor - Official asynchronous MongoDB driver for Python.
+- **Database**: MongoDB (Supports both local installations and MongoDB Atlas cloud deployment).
+- **Validation and Serialization**: Pydantic v2 & Pydantic Settings - Strict validation for request/response schemas and environment configurations.
+- **Authentication & Security**:
+  - JWT (JSON Web Tokens via python-jose) - Access token issuing and verification.
+  - Bcrypt & Passlib - Secure password hashing and verification algorithms.
+- **ASGI Server**: Uvicorn - Lightning-fast ASGI server implementation.
 
 ---
 
-## ⚙️ Налаштування оточення (Environment Variables)
+## Architecture and Project Structure
 
-Для запуску сервера необхідно створити файл `.env` у кореневій директорії бекенду з наступними змінними:
+The project follows a modular architecture separating concerns cleanly across modules:
+
+- `app/core` - Database connectivity (`database.py`), application configuration (`config.py`), and security primitives (`security.py`).
+- `app/dependencies` - FastAPI dependency injection for JWT token verification and current user retrieval (`auth.py`).
+- `app/routers` - REST API controllers:
+  - `auth.py` - User registration, authentication, logout, and email verification.
+  - `tasks.py` - Task CRUD operations, filtering, pagination, and status toggles.
+  - `users.py` - Profile management and password updates.
+- `app/services` - Core business logic encapsulates (`auth_service.py`, `task_service.py`).
+- `app/schemas` - Pydantic models for request validation and response formatting.
+- `app/models` - Internal database entity data structures.
+- `app/utils` - Utility functions (pagination response formatters).
+
+---
+
+## API Endpoints & Functionality
+
+### 1. Authentication (`/api/v1/auth`)
+- `GET /api/v1/auth/check-email?email=...` - Checks whether an email address is already registered in the system.
+- `POST /api/v1/auth/register` - Registers a new user (verifies email uniqueness, hashes password).
+- `POST /api/v1/auth/login` - Authenticates user credentials and returns a JWT Access Token.
+- `GET /api/v1/auth/me` - Retrieves profile data for the authenticated user.
+- `POST /api/v1/auth/logout` - Invalidates/logs out current user session.
+
+### 2. Task Management (`/api/v1/tasks`)
+- `POST /api/v1/tasks` - Creates a new task (fields: `title` up to 100 chars, `description`, `due_date`, `priority` between 1 and 10).
+- `GET /api/v1/tasks` - Retrieves a list of tasks owned by the user with support for:
+  - Pagination: `page` (default 1), `limit` (1 to 500).
+  - Status Filtering: `status` (`all`, `done`, `undone`, `overdue`).
+  - Search: `search` (case-insensitive substring match on task title).
+  - Sorting: `sort` (`created_at`, `due_date`, `priority`), `order` (`asc`, `desc`).
+- `GET /api/v1/tasks/{task_id}` - Fetches a specific task by its UUID.
+- `PUT /api/v1/tasks/{task_id}` - Updates all details of a task.
+- `PATCH /api/v1/tasks/{task_id}/status` - Toggles task completion status (`is_completed`).
+- `DELETE /api/v1/tasks/{task_id}` - Deletes a task by UUID.
+
+### 3. User Profile (`/api/v1/users`)
+- `PUT /api/v1/users/me` - Updates user `username` and `avatar_url`.
+- `POST /api/v1/users/change-password` - Updates password after verifying current password correctness and ensuring new password differs from current.
+- `POST /api/v1/users/verify-password` - Validates whether the supplied password matches the current user's password.
+
+### 4. Interactive Documentation
+FastAPI automatically generates interactive API documentation:
+- **Swagger UI**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
+
+---
+
+## Environment Variables
+
+Create a `.env` file in the root directory of the backend with the following configuration:
 
 ```env
-SECRET_KEY=your_jwt_secret_key
+SECRET_KEY=your_jwt_secret_key_here
 ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=60
-MONGODB_URL=mongodb+srv://<username>:<password>@cluster.mongodb.net/dbname
+ACCESS_TOKEN_EXPIRE_MINUTES=43200
+MONGODB_URL=mongodb+srv://username:password@cluster.mongodb.net/dbname
 DATABASE_NAME=todo_app_database
 ```
 
 ---
 
-## 🏁 Швидкий старт (Quick Start)
+## Quick Start
 
-### 1. Встановлення залежностей
-Рекомендується використовувати віртуальне оточення:
+### 1. Create and Activate Virtual Environment
 
+On Windows (PowerShell / CMD):
 ```bash
-# Створення віртуального оточення
 python -m venv .venv
-
-# Активація (Windows)
 .venv\Scripts\activate
+```
 
-# Активація (macOS/Linux)
+On macOS / Linux:
+```bash
+python3 -m venv .venv
 source .venv/bin/activate
+```
 
-# Встановлення залежностей
+### 2. Install Dependencies
+```bash
 pip install -r requirements.txt
 ```
 
-### 2. Запуск сервера розробки
+### 3. Run Development Server
 ```bash
 uvicorn app.main:app --reload
 ```
-Після цього сервер запуститься за адресою `http://localhost:8000`.
-
-*   **Swagger API Docs**: `http://localhost:8000/docs`
-*   **Redoc API Docs**: `http://localhost:8000/redoc`
+The server will start at `http://localhost:8000`.
