@@ -1,6 +1,7 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, status
+from app.core.config import settings
 from app.core.database import db
 from app.core.security import get_password_hash, verify_password, create_access_token
 from app.schemas.auth import LoginRequest, Token
@@ -49,5 +50,10 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        access_token = create_access_token(subject=user["_id"])
+        if login_in.remember_me:
+            expires_delta = timedelta(days=settings.REMEMBER_ME_EXPIRE_DAYS)
+        else:
+            expires_delta = timedelta(days=settings.DEFAULT_TOKEN_EXPIRE_DAYS)
+        
+        access_token = create_access_token(subject=user["_id"], expires_delta=expires_delta)
         return Token(access_token=access_token)

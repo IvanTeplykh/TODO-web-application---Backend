@@ -100,3 +100,36 @@ async def test_logout_authorized(async_client, authenticated_user):
     response = await async_client.post("/api/v1/auth/logout", headers=headers)
     assert response.status_code == 200
     assert response.json() == {"message": "Logged out successfully"}
+
+@pytest.mark.asyncio
+async def test_login_remember_me(async_client):
+    from jose import jwt
+    from app.core.config import settings
+
+    reg_payload = {
+        "username": "RememberUser",
+        "email": "remember@example.com",
+        "password": "Password123!"
+    }
+    await async_client.post("/api/v1/auth/register", json=reg_payload)
+
+    # Login without remember_me
+    res1 = await async_client.post("/api/v1/auth/login", json={
+        "email": "remember@example.com",
+        "password": "Password123!",
+        "remember_me": False
+    })
+    token1 = res1.json()["access_token"]
+    payload1 = jwt.decode(token1, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+
+    # Login with remember_me
+    res2 = await async_client.post("/api/v1/auth/login", json={
+        "email": "remember@example.com",
+        "password": "Password123!",
+        "remember_me": True
+    })
+    token2 = res2.json()["access_token"]
+    payload2 = jwt.decode(token2, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+
+    assert payload2["exp"] > payload1["exp"]
+
