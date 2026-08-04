@@ -1,37 +1,60 @@
-import motor.motor_asyncio
+from typing import AsyncGenerator
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from app.core.config import settings
+from app.models.base import Base
+import app.models.user
+import app.models.task
+import app.models.chat
 
 class Database:
     def __init__(self):
-        self.client: motor.motor_asyncio.AsyncIOMotorClient = None
-        self._db = None
+        self.engine = None
+        self.session_factory = None
 
-    def connect_to_database(self):
-        self.client = motor.motor_asyncio.AsyncIOMotorClient(settings.MONGODB_URL)
-        self._db = self.client[settings.DATABASE_NAME]
+    def connect_to_database(self, url: str | None = None):
+        db_url = url or settings.DATABASE_URL
+        if db_url.startswith("postgresql://"):
+            db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-    def close_database_connection(self):
-        if self.client:
-            self.client.close()
+        if "asyncpg" in db_url and "sslmode=" in db_url:
+            db_url = (
+                db_url.replace("sslmode=require", "ssl=require")
+                .replace("sslmode=prefer", "ssl=prefer")
+                .replace("sslmode=allow", "ssl=allow")
+                .replace("sslmode=disable", "ssl=disable")
+            )
 
-    @property
-    def database(self):
-        return self._db
+        connect_args = {}
+        if db_url.startswith("sqlite"):
+            connect_args = {"check_same_thread": False}
 
-    @property
-    def users_collection(self):
-        return self._db["users"]
+        self.engine = create_async_engine(
+            db_url,
+            echo=False,
+            connect_args=connect_args,
+            future=True
+        )
+        self.session_factory = async_sessionmaker(
+            bind=self.engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False
+        )
 
-    @property
-    def tasks_collection(self):
-        return self._db["tasks"]
+    async def init_db(self):
+        if self.engine:
+            async with self.engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
 
-    @property
-    def messages_collection(self):
-        return self._db["messages"]
-
-    @property
-    def chat_requests_collection(self):
-        return self._db["chat_requests"]
+    async def close_database_connection(self):
+        if self.engine:
+            await self.engine.dispose()
 
 db = Database()
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with db.session_factory() as session:
+        try:
+            yield session
+        finally:
+            await session.close()

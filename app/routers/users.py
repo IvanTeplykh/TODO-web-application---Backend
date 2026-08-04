@@ -1,67 +1,62 @@
 from fastapi import APIRouter, Depends, status, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.schemas.user import UserResponse, UserUpdate, ChangePasswordRequest, VerifyPasswordRequest
 from app.dependencies.auth import get_current_user
-from app.core.database import db
+from app.core.database import get_db
+from app.models.user import UserModel
 from app.core.security import verify_password, get_password_hash
 from app.core.connection_manager import connection_manager
-from uuid import UUID
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 @router.put("/me", response_model=UserResponse)
 async def update_profile(
     profile_in: UserUpdate,
-    current_user: UserResponse = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
 ):
-    user_id_str = str(current_user.id)
-    update_data = {
-        "username": profile_in.username,
-        "avatar_url": profile_in.avatar_url
-    }
-    
-    # Update users collection
-    await db.users_collection.update_one(
-        {"_id": user_id_str},
-        {"$set": update_data}
-    )
+    stmt = select(UserModel).where(UserModel.id == current_user.id)
+    res = await session.execute(stmt)
+    user_db = res.scalar_one_or_none()
 
-    # Cascade update all historical and active messages sent by this user in MongoDB
-    await db.messages_collection.update_many(
-        {"sender_id": user_id_str},
-        {"$set": {
-            "sender_name": profile_in.username,
-            "sender_avatar": profile_in.avatar_url
-        }}
-    )
+    if not user_db:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user_db.username = profile_in.username
+    user_db.avatar_url = profile_in.avatar_url
+    await session.commit()
+    await session.refresh(user_db)
 
     # Broadcast real-time profile update to all connected WebSocket clients
     await connection_manager.broadcast({
         "type": "user_profile_updated",
-        "user_id": user_id_str,
+        "user_id": str(current_user.id),
         "username": profile_in.username,
         "avatar_url": profile_in.avatar_url
     })
     
-    # Fetch updated user
-    updated_user = await db.users_collection.find_one({"_id": user_id_str})
-    
     return UserResponse(
-        id=UUID(updated_user["_id"]),
-        username=updated_user["username"],
-        email=updated_user["email"],
-        avatar_url=updated_user.get("avatar_url")
+        id=user_db.id,
+        username=user_db.username,
+        email=user_db.email,
+        avatar_url=user_db.avatar_url
     )
 
 @router.post("/change-password")
 async def change_password(
     data: ChangePasswordRequest,
-    current_user: UserResponse = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
 ):
-    user = await db.users_collection.find_one({"_id": str(current_user.id)})
-    if not user:
+    stmt = select(UserModel).where(UserModel.id == current_user.id)
+    res = await session.execute(stmt)
+    user_db = res.scalar_one_or_none()
+
+    if not user_db:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         
-    if not verify_password(data.current_password, user["password"]):
+    if not verify_password(data.current_password, user_db.password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect current password"
@@ -73,23 +68,23 @@ async def change_password(
             detail="New password must be different from current password"
         )
         
-    hashed_password = get_password_hash(data.new_password)
-    
-    await db.users_collection.update_one(
-        {"_id": str(current_user.id)},
-        {"$set": {"password": hashed_password}}
-    )
+    user_db.password = get_password_hash(data.new_password)
+    await session.commit()
     
     return {"message": "Password changed successfully"}
 
 @router.post("/verify-password")
 async def verify_user_password(
     data: VerifyPasswordRequest,
-    current_user: UserResponse = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
 ):
-    user = await db.users_collection.find_one({"_id": str(current_user.id)})
-    if not user:
+    stmt = select(UserModel).where(UserModel.id == current_user.id)
+    res = await session.execute(stmt)
+    user_db = res.scalar_one_or_none()
+
+    if not user_db:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         
-    is_valid = verify_password(data.password, user["password"])
+    is_valid = verify_password(data.password, user_db.password)
     return {"valid": is_valid}

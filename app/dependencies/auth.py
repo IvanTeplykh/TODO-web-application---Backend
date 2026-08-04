@@ -1,15 +1,21 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.core.config import settings
-from app.core.database import db
+from app.core.database import get_db
+from app.models.user import UserModel
 from app.schemas.auth import TokenData
 from app.schemas.user import UserResponse
 from uuid import UUID
 
 security_scheme = HTTPBearer()
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security_scheme)) -> UserResponse:
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
+    session: AsyncSession = Depends(get_db)
+) -> UserResponse:
     token = credentials.credentials
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -30,13 +36,16 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     except ValueError:
         raise credentials_exception
 
-    user = await db.users_collection.find_one({"_id": str(user_uuid)})
+    stmt = select(UserModel).where(UserModel.id == user_uuid)
+    result = await session.execute(stmt)
+    user = result.scalar_one_or_none()
+
     if user is None:
         raise credentials_exception
     
     return UserResponse(
-        id=UUID(user["_id"]),
-        username=user["username"],
-        email=user["email"],
-        avatar_url=user.get("avatar_url")
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        avatar_url=user.avatar_url
     )

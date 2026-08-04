@@ -1,7 +1,6 @@
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from mongomock_motor import AsyncMongoMockClient
 from app.main import app
 from app.core.database import db
 
@@ -15,24 +14,14 @@ def event_loop():
 @pytest_asyncio.fixture(autouse=True)
 async def mock_database():
     """
-    Fixture overriding global database instance with an in-memory mock Motor client.
-    Clears collections before each test to guarantee complete test isolation.
+    Fixture initializing an in-memory SQLite database for complete test isolation.
     """
-    mock_client = AsyncMongoMockClient()
-    mock_db = mock_client["test_todo_db"]
-    
-    db.client = mock_client
-    db._db = mock_db
-    
-    # Disable connect/close side effects during lifespan
-    db.connect_to_database = lambda: None
-    db.close_database_connection = lambda: None
+    db.connect_to_database("sqlite+aiosqlite:///:memory:")
+    await db.init_db()
 
-    yield mock_db
+    yield db
 
-    # Clean collections after each test
-    await mock_db["users"].delete_many({})
-    await mock_db["tasks"].delete_many({})
+    await db.close_database_connection()
 
 @pytest_asyncio.fixture
 async def async_client():

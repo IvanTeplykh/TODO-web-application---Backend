@@ -1,49 +1,56 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.core.config import settings
-from app.core.database import db
 from app.core.security import get_password_hash, verify_password, create_access_token
+from app.models.user import UserModel
 from app.schemas.auth import LoginRequest, Token
 from app.schemas.user import UserCreate, UserRegisterResponse
 
 class AuthService:
     @staticmethod
-    async def check_email_exists(email: str) -> bool:
-        email_lower = email.lower()
-        existing_user = await db.users_collection.find_one({"email": email_lower})
-        return existing_user is not None
+    async def check_email_exists(session: AsyncSession, email: str) -> bool:
+        stmt = select(UserModel).where(UserModel.email == email.lower())
+        res = await session.execute(stmt)
+        return res.scalar_one_or_none() is not None
 
     @staticmethod
-    async def register_user(user_in: UserCreate) -> UserRegisterResponse:
+    async def register_user(session: AsyncSession, user_in: UserCreate) -> UserRegisterResponse:
         email_lower = user_in.email.lower()
-        existing_user = await db.users_collection.find_one({"email": email_lower})
-        if existing_user:
+        stmt = select(UserModel).where(UserModel.email == email_lower)
+        res = await session.execute(stmt)
+        if res.scalar_one_or_none():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="User with this email already exists"
             )
         
-        user_id = str(uuid.uuid4())
+        user_id = uuid.uuid4()
         hashed_password = get_password_hash(user_in.password)
         
-        user_doc = {
-            "_id": user_id,
-            "username": user_in.username,
-            "email": email_lower,
-            "password": hashed_password,
-            "avatar_url": None,
-            "created_at": datetime.now(timezone.utc)
-        }
+        new_user = UserModel(
+            id=user_id,
+            username=user_in.username,
+            email=email_lower,
+            password=hashed_password,
+            avatar_url=None,
+            created_at=datetime.now(timezone.utc)
+        )
         
-        await db.users_collection.insert_one(user_doc)
+        session.add(new_user)
+        await session.commit()
         return UserRegisterResponse(message="User created successfully")
 
     @staticmethod
-    async def authenticate_user(login_in: LoginRequest) -> Token:
+    async def authenticate_user(session: AsyncSession, login_in: LoginRequest) -> Token:
         email_lower = login_in.email.lower()
-        user = await db.users_collection.find_one({"email": email_lower})
-        if not user or not verify_password(login_in.password, user["password"]):
+        stmt = select(UserModel).where(UserModel.email == email_lower)
+        res = await session.execute(stmt)
+        user = res.scalar_one_or_none()
+        
+        if not user or not verify_password(login_in.password, user.password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
@@ -55,5 +62,5 @@ class AuthService:
         else:
             expires_delta = timedelta(days=settings.DEFAULT_TOKEN_EXPIRE_DAYS)
         
-        access_token = create_access_token(subject=user["_id"], expires_delta=expires_delta)
+        access_token = create_access_token(subject=str(user.id), expires_delta=expires_delta)
         return Token(access_token=access_token)

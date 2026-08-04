@@ -9,12 +9,13 @@ async def test_update_profile_info(async_client, authenticated_user):
     user_id = UUID(authenticated_user["user"]["id"])
 
     # Create a message first
-    await chat_service.create_message(
-        sender_id=user_id,
-        sender_name="OldName",
-        sender_avatar=None,
-        data=MessageCreate(recipient_id="global", content="Test Message Before Profile Update")
-    )
+    from app.core.database import db
+    async with db.session_factory() as session:
+        await chat_service.create_message(
+            session=session,
+            sender_id=user_id,
+            data=MessageCreate(recipient_id="global", content="Test Message Before Profile Update")
+        )
 
     update_payload = {
         "username": "UpdatedUsername",

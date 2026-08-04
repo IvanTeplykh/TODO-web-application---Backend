@@ -73,12 +73,13 @@ async def test_edit_and_delete_message(async_client: AsyncClient, authenticated_
     user_id = UUID(authenticated_user["user"]["id"])
 
     # Create a message directly
-    msg = await chat_service.create_message(
-        sender_id=user_id,
-        sender_name="TestUser",
-        sender_avatar=None,
-        data=MessageCreate(recipient_id="global", content="Original Message")
-    )
+    from app.core.database import db
+    async with db.session_factory() as session:
+        msg = await chat_service.create_message(
+            session=session,
+            sender_id=user_id,
+            data=MessageCreate(recipient_id="global", content="Original Message")
+        )
     msg_id = str(msg.id)
 
     # Edit message via API

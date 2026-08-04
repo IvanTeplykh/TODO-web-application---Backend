@@ -9,15 +9,16 @@ from app.routers.chat import router as chat_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Connect to MongoDB
+    # Startup: Connect to DB and create tables
     db.connect_to_database()
+    await db.init_db()
     yield
-    # Shutdown: Close MongoDB client connection
-    db.close_database_connection()
+    # Shutdown: Close database connection
+    await db.close_database_connection()
 
 app = FastAPI(
     title="TODO Web Application Backend",
-    description="FastAPI + MongoDB backend for task management",
+    description="FastAPI + PostgreSQL backend for task management & real-time chat",
     version="1.0.0",
     lifespan=lifespan
 )

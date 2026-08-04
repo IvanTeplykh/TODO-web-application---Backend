@@ -2,8 +2,11 @@ from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, H
 from typing import List, Optional
 from uuid import UUID
 from jose import jwt, JWTError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.core.config import settings
-from app.core.database import db
+from app.core.database import db, get_db
+from app.models.user import UserModel
 from app.core.connection_manager import connection_manager
 from app.dependencies.auth import get_current_user
 from app.schemas.chat import (
@@ -20,7 +23,7 @@ from app.services.chat_service import chat_service
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-async def get_user_from_token_string(token: str) -> UserResponse:
+async def get_user_from_token_string(session: AsyncSession, token: str) -> UserResponse:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id_str: str = payload.get("sub")
@@ -33,7 +36,10 @@ async def get_user_from_token_string(token: str) -> UserResponse:
             detail="Invalid WebSocket authentication token"
         )
         
-    user = await db.users_collection.find_one({"_id": str(user_uuid)})
+    stmt = select(UserModel).where(UserModel.id == user_uuid)
+    res = await session.execute(stmt)
+    user = res.scalar_one_or_none()
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -41,31 +47,36 @@ async def get_user_from_token_string(token: str) -> UserResponse:
         )
         
     return UserResponse(
-        id=UUID(user["_id"]),
-        username=user["username"],
-        email=user["email"],
-        avatar_url=user.get("avatar_url")
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        avatar_url=user.avatar_url
     )
 
 @router.get("/users", response_model=List[ChatUser])
-async def get_chat_users(current_user: UserResponse = Depends(get_current_user)):
-    return await chat_service.get_chat_users(current_user.id)
+async def get_chat_users(
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    return await chat_service.get_chat_users(session, current_user.id)
 
 @router.get("/messages", response_model=List[MessageResponse])
 async def get_chat_messages(
     recipient_id: str = Query("global", description="Recipient UUID or 'global'"),
     limit: int = Query(100, ge=1, le=500),
-    current_user: UserResponse = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
 ):
-    return await chat_service.get_messages(current_user.id, recipient_id, limit)
+    return await chat_service.get_messages(session, current_user.id, recipient_id, limit)
 
 @router.patch("/messages/{message_id}", response_model=MessageResponse)
 async def edit_message(
     message_id: str,
     data: MessageUpdate,
-    current_user: UserResponse = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
 ):
-    res = await chat_service.edit_message(current_user.id, message_id, data.content)
+    res = await chat_service.edit_message(session, current_user.id, message_id, data.content)
     
     payload = {
         "type": "message_edited",
@@ -76,6 +87,7 @@ async def edit_message(
             "sender_avatar": res.sender_avatar,
             "recipient_id": res.recipient_id,
             "content": res.content,
+            "content_hash": res.content_hash,
             "created_at": res.created_at.isoformat(),
             "is_edited": res.is_edited,
             "updated_at": res.updated_at.isoformat() if res.updated_at else None
@@ -94,9 +106,10 @@ async def edit_message(
 @router.delete("/messages/{message_id}")
 async def delete_message(
     message_id: str,
-    current_user: UserResponse = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
 ):
-    res = await chat_service.delete_message(current_user.id, message_id)
+    res = await chat_service.delete_message(session, current_user.id, message_id)
     
     payload = {
         "type": "message_deleted",
@@ -116,9 +129,10 @@ async def delete_message(
 @router.post("/requests", response_model=ChatRequestResponse, status_code=status.HTTP_201_CREATED)
 async def send_chat_request(
     data: ChatRequestCreate,
-    current_user: UserResponse = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
 ):
-    res = await chat_service.send_chat_request(current_user.id, data.recipient_id)
+    res = await chat_service.send_chat_request(session, current_user.id, data.recipient_id)
     
     # Broadcast real-time notification to recipient
     await connection_manager.send_personal_message({
@@ -129,18 +143,21 @@ async def send_chat_request(
     return res
 
 @router.get("/requests", response_model=List[ChatRequestResponse])
-async def get_chat_requests(current_user: UserResponse = Depends(get_current_user)):
-    return await chat_service.get_chat_requests(current_user.id)
+async def get_chat_requests(
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    return await chat_service.get_chat_requests(session, current_user.id)
 
 @router.patch("/requests/{request_id}", response_model=ChatRequestResponse)
 async def respond_chat_request(
     request_id: str,
     data: ChatRequestAction,
-    current_user: UserResponse = Depends(get_current_user)
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
 ):
-    res = await chat_service.respond_chat_request(current_user.id, request_id, data.action)
+    res = await chat_service.respond_chat_request(session, current_user.id, request_id, data.action)
     
-    # Broadcast real-time update to both requester and recipient
     update_payload = {
         "type": "chat_request_updated",
         "request": res.model_dump(mode="json")
@@ -160,12 +177,13 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
 
     clean_token = token.strip('"\'')
 
-    try:
-        current_user = await get_user_from_token_string(clean_token)
-    except HTTPException:
-        await websocket.send_json({"type": "error", "detail": "Invalid authentication token"})
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
+    async with db.session_factory() as session:
+        try:
+            current_user = await get_user_from_token_string(session, clean_token)
+        except HTTPException:
+            await websocket.send_json({"type": "error", "detail": "Invalid authentication token"})
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
 
     user_id_str = str(current_user.id)
     if user_id_str not in connection_manager.active_connections:
@@ -183,7 +201,6 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
         while True:
             data = await websocket.receive_json()
             
-            # Handle ping/pong heartbeat to keep connection alive on cloud platforms
             if data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
                 continue
@@ -194,22 +211,21 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
             if not content:
                 continue
 
-            # Verify that private chat connection is accepted before sending message
-            can_chat = await chat_service.can_users_chat(user_id_str, recipient_id)
-            if not can_chat:
-                await websocket.send_json({
-                    "type": "error",
-                    "detail": "Private chat request must be accepted before sending messages"
-                })
-                continue
+            async with db.session_factory() as session:
+                can_chat = await chat_service.can_users_chat(session, current_user.id, recipient_id)
+                if not can_chat:
+                    await websocket.send_json({
+                        "type": "error",
+                        "detail": "Private chat request must be accepted before sending messages"
+                    })
+                    continue
 
-            msg_in = MessageCreate(recipient_id=recipient_id, content=content)
-            saved_msg = await chat_service.create_message(
-                sender_id=current_user.id,
-                sender_name=current_user.username,
-                sender_avatar=current_user.avatar_url,
-                data=msg_in
-            )
+                msg_in = MessageCreate(recipient_id=recipient_id, content=content)
+                saved_msg = await chat_service.create_message(
+                    session=session,
+                    sender_id=current_user.id,
+                    data=msg_in
+                )
 
             msg_payload = {
                 "type": "new_message",
@@ -220,6 +236,7 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
                     "sender_avatar": saved_msg.sender_avatar,
                     "recipient_id": saved_msg.recipient_id,
                     "content": saved_msg.content,
+                    "content_hash": saved_msg.content_hash,
                     "created_at": saved_msg.created_at.isoformat(),
                     "is_edited": False,
                     "updated_at": None
@@ -229,7 +246,6 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
             if recipient_id == "global":
                 await connection_manager.broadcast(msg_payload)
             else:
-                # Send to recipient and echo back to sender
                 await connection_manager.send_personal_message(msg_payload, recipient_id)
                 if recipient_id != user_id_str:
                     await connection_manager.send_personal_message(msg_payload, user_id_str)
