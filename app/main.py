@@ -5,6 +5,7 @@ from app.core.database import db
 from app.routers.auth import router as auth_router
 from app.routers.tasks import router as tasks_router
 from app.routers.users import router as users_router
+from app.routers.chat import router as chat_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,6 +35,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(tasks_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
+app.include_router(chat_router, prefix="/api/v1")
 
 @app.get("/")
 def read_root():
