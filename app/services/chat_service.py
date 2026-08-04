@@ -37,7 +37,9 @@ class ChatService:
             "sender_avatar": sender_avatar,
             "recipient_id": data.recipient_id,
             "content": data.content,
-            "created_at": created_at.isoformat()
+            "created_at": created_at.isoformat(),
+            "is_edited": False,
+            "updated_at": None
         }
         
         await db.messages_collection.insert_one(doc)
@@ -49,7 +51,9 @@ class ChatService:
             sender_avatar=sender_avatar,
             recipient_id=data.recipient_id,
             content=data.content,
-            created_at=created_at
+            created_at=created_at,
+            is_edited=False,
+            updated_at=None
         )
 
     @staticmethod
@@ -77,6 +81,7 @@ class ChatService:
         results = []
         for d in docs:
             created_dt = datetime.fromisoformat(d["created_at"]) if isinstance(d["created_at"], str) else d["created_at"]
+            updated_dt = datetime.fromisoformat(d["updated_at"]) if d.get("updated_at") else None
             results.append(
                 MessageResponse(
                     id=UUID(d["_id"]),
@@ -85,10 +90,63 @@ class ChatService:
                     sender_avatar=d.get("sender_avatar"),
                     recipient_id=d["recipient_id"],
                     content=d["content"],
-                    created_at=created_dt
+                    created_at=created_dt,
+                    is_edited=d.get("is_edited", False),
+                    updated_at=updated_dt
                 )
             )
         return results
+
+    @staticmethod
+    async def edit_message(sender_id: UUID, message_id: str, new_content: str) -> MessageResponse:
+        str_sender_id = str(sender_id)
+        msg_doc = await db.messages_collection.find_one({"_id": message_id})
+        if not msg_doc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+        if msg_doc["sender_id"] != str_sender_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot edit someone else's message")
+
+        updated_at = datetime.now(timezone.utc)
+        await db.messages_collection.update_one(
+            {"_id": message_id},
+            {"$set": {
+                "content": new_content,
+                "is_edited": True,
+                "updated_at": updated_at.isoformat()
+            }}
+        )
+
+        created_dt = datetime.fromisoformat(msg_doc["created_at"]) if isinstance(msg_doc["created_at"], str) else msg_doc["created_at"]
+
+        return MessageResponse(
+            id=UUID(message_id),
+            sender_id=sender_id,
+            sender_name=msg_doc["sender_name"],
+            sender_avatar=msg_doc.get("sender_avatar"),
+            recipient_id=msg_doc["recipient_id"],
+            content=new_content,
+            created_at=created_dt,
+            is_edited=True,
+            updated_at=updated_at
+        )
+
+    @staticmethod
+    async def delete_message(sender_id: UUID, message_id: str) -> dict:
+        str_sender_id = str(sender_id)
+        msg_doc = await db.messages_collection.find_one({"_id": message_id})
+        if not msg_doc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+        if msg_doc["sender_id"] != str_sender_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete someone else's message")
+
+        await db.messages_collection.delete_one({"_id": message_id})
+        return {
+            "message_id": message_id,
+            "recipient_id": msg_doc["recipient_id"],
+            "sender_id": msg_doc["sender_id"]
+        }
 
     @staticmethod
     async def get_chat_users(current_user_id: UUID) -> List[ChatUser]:

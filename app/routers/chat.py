@@ -8,6 +8,7 @@ from app.core.connection_manager import connection_manager
 from app.dependencies.auth import get_current_user
 from app.schemas.chat import (
     MessageCreate,
+    MessageUpdate,
     MessageResponse,
     ChatUser,
     ChatRequestCreate,
@@ -57,6 +58,60 @@ async def get_chat_messages(
     current_user: UserResponse = Depends(get_current_user)
 ):
     return await chat_service.get_messages(current_user.id, recipient_id, limit)
+
+@router.patch("/messages/{message_id}", response_model=MessageResponse)
+async def edit_message(
+    message_id: str,
+    data: MessageUpdate,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    res = await chat_service.edit_message(current_user.id, message_id, data.content)
+    
+    payload = {
+        "type": "message_edited",
+        "message": {
+            "id": str(res.id),
+            "sender_id": str(res.sender_id),
+            "sender_name": res.sender_name,
+            "sender_avatar": res.sender_avatar,
+            "recipient_id": res.recipient_id,
+            "content": res.content,
+            "created_at": res.created_at.isoformat(),
+            "is_edited": res.is_edited,
+            "updated_at": res.updated_at.isoformat() if res.updated_at else None
+        }
+    }
+    
+    if res.recipient_id == "global":
+        await connection_manager.broadcast(payload)
+    else:
+        await connection_manager.send_personal_message(payload, res.recipient_id)
+        if res.recipient_id != str(res.sender_id):
+            await connection_manager.send_personal_message(payload, str(res.sender_id))
+            
+    return res
+
+@router.delete("/messages/{message_id}")
+async def delete_message(
+    message_id: str,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    res = await chat_service.delete_message(current_user.id, message_id)
+    
+    payload = {
+        "type": "message_deleted",
+        "message_id": message_id,
+        "recipient_id": res["recipient_id"]
+    }
+    
+    if res["recipient_id"] == "global":
+        await connection_manager.broadcast(payload)
+    else:
+        await connection_manager.send_personal_message(payload, res["recipient_id"])
+        if res["recipient_id"] != res["sender_id"]:
+            await connection_manager.send_personal_message(payload, res["sender_id"])
+            
+    return {"message": "Message deleted successfully", "id": message_id}
 
 @router.post("/requests", response_model=ChatRequestResponse, status_code=status.HTTP_201_CREATED)
 async def send_chat_request(
@@ -165,7 +220,9 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
                     "sender_avatar": saved_msg.sender_avatar,
                     "recipient_id": saved_msg.recipient_id,
                     "content": saved_msg.content,
-                    "created_at": saved_msg.created_at.isoformat()
+                    "created_at": saved_msg.created_at.isoformat(),
+                    "is_edited": False,
+                    "updated_at": None
                 }
             }
 

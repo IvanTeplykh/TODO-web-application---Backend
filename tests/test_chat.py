@@ -1,5 +1,7 @@
 import pytest
 from httpx import AsyncClient
+from app.services.chat_service import chat_service
+from app.schemas.chat import MessageCreate
 
 @pytest.mark.asyncio
 async def test_chat_users_list(async_client: AsyncClient, authenticated_user: dict):
@@ -63,3 +65,29 @@ async def test_chat_request_lifecycle(async_client: AsyncClient, authenticated_u
     accept_res = await async_client.patch(f"/api/v1/chat/requests/{request_id}", json={"action": "accept"}, headers=headers2)
     assert accept_res.status_code == 200
     assert accept_res.json()["status"] == "accepted"
+
+@pytest.mark.asyncio
+async def test_edit_and_delete_message(async_client: AsyncClient, authenticated_user: dict):
+    headers = authenticated_user["headers"]
+    from uuid import UUID
+    user_id = UUID(authenticated_user["user"]["id"])
+
+    # Create a message directly
+    msg = await chat_service.create_message(
+        sender_id=user_id,
+        sender_name="TestUser",
+        sender_avatar=None,
+        data=MessageCreate(recipient_id="global", content="Original Message")
+    )
+    msg_id = str(msg.id)
+
+    # Edit message via API
+    edit_res = await async_client.patch(f"/api/v1/chat/messages/{msg_id}", json={"content": "Edited Message"}, headers=headers)
+    assert edit_res.status_code == 200
+    edited_data = edit_res.json()
+    assert edited_data["content"] == "Edited Message"
+    assert edited_data["is_edited"] is True
+
+    # Delete message via API
+    del_res = await async_client.delete(f"/api/v1/chat/messages/{msg_id}", headers=headers)
+    assert del_res.status_code == 200

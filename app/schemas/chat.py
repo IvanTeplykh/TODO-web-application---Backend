@@ -15,6 +15,9 @@ class MessageCreate(BaseModel):
     recipient_id: str = Field(..., description="UUID of recipient user or 'global'")
     content: str = Field(..., min_length=1, max_length=2000, description="Message text content")
 
+class MessageUpdate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=2000, description="New message text content")
+
 class MessageResponse(BaseModel):
     id: UUID
     sender_id: UUID
@@ -23,6 +26,8 @@ class MessageResponse(BaseModel):
     recipient_id: str
     content: str
     created_at: datetime
+    is_edited: bool = False
+    updated_at: Optional[datetime] = None
 
 class ChatRequestCreate(BaseModel):
     recipient_id: str = Field(..., description="UUID of user to request chat with")
