@@ -11,6 +11,7 @@ from app.core.connection_manager import connection_manager
 router = APIRouter(prefix="/users", tags=["users"])
 
 @router.put("/me", response_model=UserResponse)
+@router.patch("/me", response_model=UserResponse)
 async def update_profile(
     profile_in: UserUpdate,
     current_user: UserResponse = Depends(get_current_user),

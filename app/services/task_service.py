@@ -21,13 +21,17 @@ class TaskService:
     def _to_response(task: TaskModel) -> TaskResponse:
         t_hash = task.title_hash or compute_hash(task.title)
         d_hash = task.description_hash or compute_hash(task.description)
+        p_hash = task.priority_hash or compute_hash(str(task.priority))
+        c_hash = task.completed_hash or compute_hash(str(task.completed))
 
         return TaskResponse(
             id=task.id,
             title=task.title,
             title_hash=t_hash,
             completed=task.completed,
+            completed_hash=c_hash,
             priority=task.priority,
+            priority_hash=p_hash,
             description=task.description,
             description_hash=d_hash,
             due_date=task.due_date,
@@ -43,6 +47,8 @@ class TaskService:
         
         t_hash = compute_hash(task_in.title)
         d_hash = compute_hash(task_in.description)
+        p_hash = compute_hash(str(task_in.priority))
+        c_hash = compute_hash("False")
 
         new_task = TaskModel(
             id=task_id,
@@ -50,7 +56,9 @@ class TaskService:
             title=task_in.title,
             title_hash=t_hash,
             completed=False,
+            completed_hash=c_hash,
             priority=task_in.priority,
+            priority_hash=p_hash,
             description=task_in.description,
             description_hash=d_hash,
             due_date=task_in.due_date,
@@ -92,7 +100,6 @@ class TaskService:
         count_res = await session.execute(count_stmt)
         total = count_res.scalar() or 0
         
-        # Sort Column Mapping
         allowed_sort_map = {
             "priority": TaskModel.priority,
             "created_at": TaskModel.created_at,
@@ -159,11 +166,15 @@ class TaskService:
             
         t_hash = compute_hash(task_in.title)
         d_hash = compute_hash(task_in.description)
+        p_hash = compute_hash(str(task_in.priority))
+        c_hash = compute_hash(str(task_in.completed))
 
         task.title = task_in.title
         task.title_hash = t_hash
         task.priority = task_in.priority
+        task.priority_hash = p_hash
         task.completed = task_in.completed
+        task.completed_hash = c_hash
         task.description = task_in.description
         task.description_hash = d_hash
         task.due_date = task_in.due_date
@@ -191,7 +202,9 @@ class TaskService:
                 detail="You do not have permission to modify this task"
             )
             
+        c_hash = compute_hash(str(status_in.completed))
         task.completed = status_in.completed
+        task.completed_hash = c_hash
         task.updated_at = datetime.now(timezone.utc)
         
         await session.commit()

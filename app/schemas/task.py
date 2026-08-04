@@ -25,7 +25,9 @@ class TaskResponse(BaseModel):
     title: str
     title_hash: Optional[str] = Field(None, description="SHA-256 integrity hash of task title")
     completed: bool
+    completed_hash: Optional[str] = Field(None, description="SHA-256 integrity hash of task completed status")
     priority: int
+    priority_hash: Optional[str] = Field(None, description="SHA-256 integrity hash of task priority")
     description: str | None = None
     description_hash: Optional[str] = Field(None, description="SHA-256 integrity hash of task description")
     due_date: datetime | None = None
