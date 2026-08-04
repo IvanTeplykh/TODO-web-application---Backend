@@ -26,4 +26,12 @@ class Database:
     def tasks_collection(self):
         return self._db["tasks"]
 
+    @property
+    def messages_collection(self):
+        return self._db["messages"]
+
+    @property
+    def chat_requests_collection(self):
+        return self._db["chat_requests"]
+
 db = Database()

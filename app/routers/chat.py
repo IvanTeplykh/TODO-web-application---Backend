@@ -6,7 +6,14 @@ from app.core.config import settings
 from app.core.database import db
 from app.core.connection_manager import connection_manager
 from app.dependencies.auth import get_current_user
-from app.schemas.chat import MessageCreate, MessageResponse, ChatUser
+from app.schemas.chat import (
+    MessageCreate,
+    MessageResponse,
+    ChatUser,
+    ChatRequestCreate,
+    ChatRequestAction,
+    ChatRequestResponse
+)
 from app.schemas.user import UserResponse
 from app.services.chat_service import chat_service
 
@@ -51,6 +58,43 @@ async def get_chat_messages(
 ):
     return await chat_service.get_messages(current_user.id, recipient_id, limit)
 
+@router.post("/requests", response_model=ChatRequestResponse, status_code=status.HTTP_201_CREATED)
+async def send_chat_request(
+    data: ChatRequestCreate,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    res = await chat_service.send_chat_request(current_user.id, data.recipient_id)
+    
+    # Broadcast real-time notification to recipient
+    await connection_manager.send_personal_message({
+        "type": "chat_request_received",
+        "request": res.model_dump(mode="json")
+    }, data.recipient_id)
+    
+    return res
+
+@router.get("/requests", response_model=List[ChatRequestResponse])
+async def get_chat_requests(current_user: UserResponse = Depends(get_current_user)):
+    return await chat_service.get_chat_requests(current_user.id)
+
+@router.patch("/requests/{request_id}", response_model=ChatRequestResponse)
+async def respond_chat_request(
+    request_id: str,
+    data: ChatRequestAction,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    res = await chat_service.respond_chat_request(current_user.id, request_id, data.action)
+    
+    # Broadcast real-time update to both requester and recipient
+    update_payload = {
+        "type": "chat_request_updated",
+        "request": res.model_dump(mode="json")
+    }
+    await connection_manager.send_personal_message(update_payload, str(res.requester_id))
+    await connection_manager.send_personal_message(update_payload, str(res.recipient_id))
+    
+    return res
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
     try:
@@ -72,10 +116,25 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
     try:
         while True:
             data = await websocket.receive_json()
+            
+            # Handle ping/pong heartbeat to keep connection alive on cloud platforms
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+                continue
+
             recipient_id = data.get("recipient_id", "global")
             content = data.get("content", "").strip()
 
             if not content:
+                continue
+
+            # Verify that private chat connection is accepted before sending message
+            can_chat = await chat_service.can_users_chat(user_id_str, recipient_id)
+            if not can_chat:
+                await websocket.send_json({
+                    "type": "error",
+                    "detail": "Private chat request must be accepted before sending messages"
+                })
                 continue
 
             msg_in = MessageCreate(recipient_id=recipient_id, content=content)

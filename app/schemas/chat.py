@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime
 from uuid import UUID
 
@@ -9,6 +9,7 @@ class ChatUser(BaseModel):
     email: str
     avatar_url: Optional[str] = None
     is_online: bool = False
+    connection_status: Optional[str] = Field("none", description="accepted, pending_sent, pending_received, none")
 
 class MessageCreate(BaseModel):
     recipient_id: str = Field(..., description="UUID of recipient user or 'global'")
@@ -21,4 +22,21 @@ class MessageResponse(BaseModel):
     sender_avatar: Optional[str] = None
     recipient_id: str
     content: str
+    created_at: datetime
+
+class ChatRequestCreate(BaseModel):
+    recipient_id: str = Field(..., description="UUID of user to request chat with")
+
+class ChatRequestAction(BaseModel):
+    action: Literal["accept", "decline"]
+
+class ChatRequestResponse(BaseModel):
+    id: UUID
+    requester_id: UUID
+    requester_name: str
+    requester_avatar: Optional[str] = None
+    recipient_id: UUID
+    recipient_name: str
+    recipient_avatar: Optional[str] = None
+    status: str
     created_at: datetime
