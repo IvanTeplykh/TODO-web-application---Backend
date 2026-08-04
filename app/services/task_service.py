@@ -1,24 +1,55 @@
 import uuid
 import math
+import hashlib
 from datetime import datetime, timezone
 from uuid import UUID
+from typing import Optional
 from fastapi import HTTPException, status
 from app.core.database import db
 from app.schemas.task import TaskCreate, TaskUpdate, TaskStatusUpdate, TaskResponse
 from app.utils.pagination import PaginatedResponse
 
+def compute_hash(text: Optional[str]) -> Optional[str]:
+    if text is None:
+        return None
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
 class TaskService:
+    @staticmethod
+    def _to_response(doc: dict) -> TaskResponse:
+        t_hash = doc.get("title_hash") or compute_hash(doc.get("title"))
+        d_hash = doc.get("description_hash") if "description_hash" in doc else compute_hash(doc.get("description"))
+
+        return TaskResponse(
+            id=UUID(doc["_id"]),
+            title=doc["title"],
+            title_hash=t_hash,
+            completed=doc["completed"],
+            priority=doc["priority"],
+            description=doc.get("description"),
+            description_hash=d_hash,
+            due_date=doc.get("due_date"),
+            created_at=doc["created_at"],
+            updated_at=doc["updated_at"],
+            owner_id=UUID(doc["owner_id"])
+        )
+
     @staticmethod
     async def create_task(task_in: TaskCreate, owner_id: UUID) -> TaskResponse:
         task_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
         
+        t_hash = compute_hash(task_in.title)
+        d_hash = compute_hash(task_in.description)
+
         task_doc = {
             "_id": task_id,
             "title": task_in.title,
+            "title_hash": t_hash,
             "completed": False,
             "priority": task_in.priority,
             "description": task_in.description,
+            "description_hash": d_hash,
             "due_date": task_in.due_date,
             "created_at": now,
             "updated_at": now,
@@ -26,18 +57,7 @@ class TaskService:
         }
         
         await db.tasks_collection.insert_one(task_doc)
-        
-        return TaskResponse(
-            id=UUID(task_doc["_id"]),
-            title=task_doc["title"],
-            completed=task_doc["completed"],
-            priority=task_doc["priority"],
-            description=task_doc.get("description"),
-            due_date=task_doc.get("due_date"),
-            created_at=task_doc["created_at"],
-            updated_at=task_doc["updated_at"],
-            owner_id=UUID(task_doc["owner_id"])
-        )
+        return TaskService._to_response(task_doc)
 
     @staticmethod
     async def get_tasks(
@@ -65,7 +85,6 @@ class TaskService:
         total = await db.tasks_collection.count_documents(query)
         
         sort_direction = 1 if order == "asc" else -1
-        # Prevent injection or incorrect fields by defaulting to created_at
         allowed_sort_fields = {"priority", "created_at", "updated_at", "title", "completed", "due_date"}
         sort_field = sort if sort in allowed_sort_fields else "created_at"
         
@@ -90,21 +109,7 @@ class TaskService:
             task_docs = await cursor.to_list(length=limit)
         
         pages = math.ceil(total / limit) if total > 0 else 1
-        
-        items = [
-            TaskResponse(
-                id=UUID(doc["_id"]),
-                title=doc["title"],
-                completed=doc["completed"],
-                priority=doc["priority"],
-                description=doc.get("description"),
-                due_date=doc.get("due_date"),
-                created_at=doc["created_at"],
-                updated_at=doc["updated_at"],
-                owner_id=UUID(doc["owner_id"])
-            )
-            for doc in task_docs
-        ]
+        items = [TaskService._to_response(doc) for doc in task_docs]
         
         return PaginatedResponse[TaskResponse](
             items=items,
@@ -128,17 +133,7 @@ class TaskService:
                 detail="You do not have permission to access this task"
             )
             
-        return TaskResponse(
-            id=UUID(task["_id"]),
-            title=task["title"],
-            completed=task["completed"],
-            priority=task["priority"],
-            description=task.get("description"),
-            due_date=task.get("due_date"),
-            created_at=task["created_at"],
-            updated_at=task["updated_at"],
-            owner_id=UUID(task["owner_id"])
-        )
+        return TaskService._to_response(task)
 
     @staticmethod
     async def update_task(task_id: UUID, task_in: TaskUpdate, owner_id: UUID) -> TaskResponse:
@@ -155,29 +150,23 @@ class TaskService:
                 detail="You do not have permission to modify this task"
             )
             
+        t_hash = compute_hash(task_in.title)
+        d_hash = compute_hash(task_in.description)
+
         update_data = {
             "title": task_in.title,
+            "title_hash": t_hash,
             "priority": task_in.priority,
             "completed": task_in.completed,
             "description": task_in.description,
+            "description_hash": d_hash,
             "due_date": task_in.due_date,
             "updated_at": datetime.now(timezone.utc)
         }
         
         await db.tasks_collection.update_one({"_id": str(task_id)}, {"$set": update_data})
-        
         updated_task = await db.tasks_collection.find_one({"_id": str(task_id)})
-        return TaskResponse(
-            id=UUID(updated_task["_id"]),
-            title=updated_task["title"],
-            completed=updated_task["completed"],
-            priority=updated_task["priority"],
-            description=updated_task.get("description"),
-            due_date=updated_task.get("due_date"),
-            created_at=updated_task["created_at"],
-            updated_at=updated_task["updated_at"],
-            owner_id=UUID(updated_task["owner_id"])
-        )
+        return TaskService._to_response(updated_task)
 
     @staticmethod
     async def update_task_status(task_id: UUID, status_in: TaskStatusUpdate, owner_id: UUID) -> TaskResponse:
@@ -200,19 +189,8 @@ class TaskService:
         }
         
         await db.tasks_collection.update_one({"_id": str(task_id)}, {"$set": update_data})
-        
         updated_task = await db.tasks_collection.find_one({"_id": str(task_id)})
-        return TaskResponse(
-            id=UUID(updated_task["_id"]),
-            title=updated_task["title"],
-            completed=updated_task["completed"],
-            priority=updated_task["priority"],
-            description=updated_task.get("description"),
-            due_date=updated_task.get("due_date"),
-            created_at=updated_task["created_at"],
-            updated_at=updated_task["updated_at"],
-            owner_id=UUID(updated_task["owner_id"])
-        )
+        return TaskService._to_response(updated_task)
 
     @staticmethod
     async def delete_task(task_id: UUID, owner_id: UUID) -> None:

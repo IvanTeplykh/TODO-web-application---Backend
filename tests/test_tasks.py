@@ -1,4 +1,5 @@
 import pytest
+import hashlib
 
 @pytest.mark.asyncio
 async def test_create_task_success(async_client, authenticated_user):
@@ -16,6 +17,8 @@ async def test_create_task_success(async_client, authenticated_user):
     assert "id" in data
     assert data["title"] == "Buy groceries"
     assert data["description"] == "Milk, Eggs, Bread"
+    assert data["title_hash"] == hashlib.sha256(b"Buy groceries").hexdigest()
+    assert data["description_hash"] == hashlib.sha256(b"Milk, Eggs, Bread").hexdigest()
     assert data["priority"] == 8
     assert data["completed"] is False
 

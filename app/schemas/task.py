@@ -18,12 +18,16 @@ class TaskUpdate(BaseModel):
 class TaskStatusUpdate(BaseModel):
     completed: bool
 
+from typing import Optional
+
 class TaskResponse(BaseModel):
     id: UUID
     title: str
+    title_hash: Optional[str] = Field(None, description="SHA-256 integrity hash of task title")
     completed: bool
     priority: int
     description: str | None = None
+    description_hash: Optional[str] = Field(None, description="SHA-256 integrity hash of task description")
     due_date: datetime | None = None
     created_at: datetime
     updated_at: datetime
