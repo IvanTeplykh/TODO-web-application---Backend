@@ -96,15 +96,26 @@ async def respond_chat_request(
     return res
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
+async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(None)):
+    await websocket.accept()
+
+    if not token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    clean_token = token.strip('"\'')
+
     try:
-        current_user = await get_user_from_token_string(token)
+        current_user = await get_user_from_token_string(clean_token)
     except HTTPException:
+        await websocket.send_json({"type": "error", "detail": "Invalid authentication token"})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     user_id_str = str(current_user.id)
-    await connection_manager.connect(user_id_str, websocket)
+    if user_id_str not in connection_manager.active_connections:
+        connection_manager.active_connections[user_id_str] = []
+    connection_manager.active_connections[user_id_str].append(websocket)
 
     # Notify connected users that someone came online
     await connection_manager.broadcast({
