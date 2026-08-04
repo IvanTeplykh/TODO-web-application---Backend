@@ -1,8 +1,20 @@
 import pytest
+from uuid import UUID
+from app.services.chat_service import chat_service
+from app.schemas.chat import MessageCreate
 
 @pytest.mark.asyncio
 async def test_update_profile_info(async_client, authenticated_user):
     headers = authenticated_user["headers"]
+    user_id = UUID(authenticated_user["user"]["id"])
+
+    # Create a message first
+    await chat_service.create_message(
+        sender_id=user_id,
+        sender_name="OldName",
+        sender_avatar=None,
+        data=MessageCreate(recipient_id="global", content="Test Message Before Profile Update")
+    )
 
     update_payload = {
         "username": "UpdatedUsername",
@@ -19,6 +31,15 @@ async def test_update_profile_info(async_client, authenticated_user):
     me_res = await async_client.get("/api/v1/auth/me", headers=headers)
     assert me_res.status_code == 200
     assert me_res.json()["username"] == "UpdatedUsername"
+
+    # Verify historical messages in chat now reflect updated username & avatar
+    messages_res = await async_client.get("/api/v1/chat/messages?recipient_id=global", headers=headers)
+    assert messages_res.status_code == 200
+    messages = messages_res.json()
+    user_msgs = [m for m in messages if m["sender_id"] == str(user_id)]
+    assert len(user_msgs) > 0
+    assert user_msgs[0]["sender_name"] == "UpdatedUsername"
+    assert user_msgs[0]["sender_avatar"] == "https://example.com/avatar.png"
 
 @pytest.mark.asyncio
 async def test_verify_password(async_client, authenticated_user):

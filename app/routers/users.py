@@ -3,6 +3,7 @@ from app.schemas.user import UserResponse, UserUpdate, ChangePasswordRequest, Ve
 from app.dependencies.auth import get_current_user
 from app.core.database import db
 from app.core.security import verify_password, get_password_hash
+from app.core.connection_manager import connection_manager
 from uuid import UUID
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -12,18 +13,37 @@ async def update_profile(
     profile_in: UserUpdate,
     current_user: UserResponse = Depends(get_current_user)
 ):
+    user_id_str = str(current_user.id)
     update_data = {
         "username": profile_in.username,
         "avatar_url": profile_in.avatar_url
     }
     
+    # Update users collection
     await db.users_collection.update_one(
-        {"_id": str(current_user.id)},
+        {"_id": user_id_str},
         {"$set": update_data}
     )
+
+    # Cascade update all historical and active messages sent by this user in MongoDB
+    await db.messages_collection.update_many(
+        {"sender_id": user_id_str},
+        {"$set": {
+            "sender_name": profile_in.username,
+            "sender_avatar": profile_in.avatar_url
+        }}
+    )
+
+    # Broadcast real-time profile update to all connected WebSocket clients
+    await connection_manager.broadcast({
+        "type": "user_profile_updated",
+        "user_id": user_id_str,
+        "username": profile_in.username,
+        "avatar_url": profile_in.avatar_url
+    })
     
     # Fetch updated user
-    updated_user = await db.users_collection.find_one({"_id": str(current_user.id)})
+    updated_user = await db.users_collection.find_one({"_id": user_id_str})
     
     return UserResponse(
         id=UUID(updated_user["_id"]),
@@ -73,4 +93,3 @@ async def verify_user_password(
         
     is_valid = verify_password(data.password, user["password"])
     return {"valid": is_valid}
-
