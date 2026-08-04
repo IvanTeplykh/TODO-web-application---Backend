@@ -77,17 +77,30 @@ class ChatService:
             
         cursor = db.messages_collection.find(query).sort("created_at", 1).limit(limit)
         docs = await cursor.to_list(length=limit)
+
+        # Batch lookup latest user profile details (username & avatar) for all message senders
+        sender_ids = list({d["sender_id"] for d in docs if "sender_id" in d})
+        senders_map = {}
+        if sender_ids:
+            senders_cursor = db.users_collection.find({"_id": {"$in": sender_ids}})
+            senders_list = await senders_cursor.to_list(length=len(sender_ids))
+            senders_map = {str(u["_id"]): u for u in senders_list}
         
         results = []
         for d in docs:
             created_dt = datetime.fromisoformat(d["created_at"]) if isinstance(d["created_at"], str) else d["created_at"]
             updated_dt = datetime.fromisoformat(d["updated_at"]) if d.get("updated_at") else None
+            
+            sender_user = senders_map.get(d["sender_id"])
+            latest_name = sender_user["username"] if sender_user else d["sender_name"]
+            latest_avatar = sender_user.get("avatar_url") if sender_user else d.get("sender_avatar")
+
             results.append(
                 MessageResponse(
                     id=UUID(d["_id"]),
                     sender_id=UUID(d["sender_id"]),
-                    sender_name=d["sender_name"],
-                    sender_avatar=d.get("sender_avatar"),
+                    sender_name=latest_name,
+                    sender_avatar=latest_avatar,
                     recipient_id=d["recipient_id"],
                     content=d["content"],
                     created_at=created_dt,
