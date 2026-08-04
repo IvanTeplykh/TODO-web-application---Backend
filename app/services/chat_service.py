@@ -1,4 +1,5 @@
 import uuid
+import hashlib
 from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
@@ -29,6 +30,7 @@ class ChatService:
     ) -> MessageResponse:
         message_id = str(uuid.uuid4())
         created_at = datetime.now(timezone.utc)
+        content_hash = hashlib.sha256(data.content.encode("utf-8")).hexdigest()
         
         doc = {
             "_id": message_id,
@@ -37,6 +39,7 @@ class ChatService:
             "sender_avatar": sender_avatar,
             "recipient_id": data.recipient_id,
             "content": data.content,
+            "content_hash": content_hash,
             "created_at": created_at.isoformat(),
             "is_edited": False,
             "updated_at": None
@@ -51,6 +54,7 @@ class ChatService:
             sender_avatar=sender_avatar,
             recipient_id=data.recipient_id,
             content=data.content,
+            content_hash=content_hash,
             created_at=created_at,
             is_edited=False,
             updated_at=None
@@ -94,6 +98,7 @@ class ChatService:
             sender_user = senders_map.get(d["sender_id"])
             latest_name = sender_user["username"] if sender_user else d["sender_name"]
             latest_avatar = sender_user.get("avatar_url") if sender_user else d.get("sender_avatar")
+            c_hash = d.get("content_hash") or hashlib.sha256(d["content"].encode("utf-8")).hexdigest()
 
             results.append(
                 MessageResponse(
@@ -103,6 +108,7 @@ class ChatService:
                     sender_avatar=latest_avatar,
                     recipient_id=d["recipient_id"],
                     content=d["content"],
+                    content_hash=c_hash,
                     created_at=created_dt,
                     is_edited=d.get("is_edited", False),
                     updated_at=updated_dt
@@ -121,10 +127,12 @@ class ChatService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot edit someone else's message")
 
         updated_at = datetime.now(timezone.utc)
+        c_hash = hashlib.sha256(new_content.encode("utf-8")).hexdigest()
         await db.messages_collection.update_one(
             {"_id": message_id},
             {"$set": {
                 "content": new_content,
+                "content_hash": c_hash,
                 "is_edited": True,
                 "updated_at": updated_at.isoformat()
             }}
@@ -139,6 +147,7 @@ class ChatService:
             sender_avatar=msg_doc.get("sender_avatar"),
             recipient_id=msg_doc["recipient_id"],
             content=new_content,
+            content_hash=c_hash,
             created_at=created_dt,
             is_edited=True,
             updated_at=updated_at

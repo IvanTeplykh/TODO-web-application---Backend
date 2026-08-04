@@ -25,6 +25,7 @@ class MessageResponse(BaseModel):
     sender_avatar: Optional[str] = None
     recipient_id: str
     content: str
+    content_hash: Optional[str] = Field(None, description="SHA-256 integrity hash of content")
     created_at: datetime
     is_edited: bool = False
     updated_at: Optional[datetime] = None
