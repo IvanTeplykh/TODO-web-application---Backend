@@ -7,8 +7,10 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_
 from sqlalchemy.orm import selectinload
+from app.core.database import global_chat_db
 from app.models.user import UserModel
 from app.models.chat import ChatRequestModel, ChatMessageModel
+from app.models.global_chat import GlobalChatMessageModel
 from app.core.connection_manager import connection_manager
 from app.schemas.chat import MessageCreate, MessageResponse, ChatUser, ChatRequestResponse
 
@@ -44,69 +46,120 @@ class ChatService:
         created_at = datetime.now(timezone.utc)
         content_hash = hashlib.sha256(data.content.encode("utf-8")).hexdigest()
 
-        # Fetch sender details
+        # Fetch sender details from main DB
         sender_stmt = select(UserModel).where(UserModel.id == sender_id)
         sender_res = await session.execute(sender_stmt)
         sender_user = sender_res.scalar_one_or_none()
         sender_name = sender_user.username if sender_user else "Unknown"
         sender_avatar = sender_user.avatar_url if sender_user else None
 
-        new_msg = ChatMessageModel(
+        if data.recipient_id == "global":
+            async with global_chat_db.session_factory() as gc_session:
+                new_msg = GlobalChatMessageModel(
+                    id=message_id,
+                    sender_id=sender_id,
+                    recipient_id="global",
+                    content=data.content,
+                    content_hash=content_hash,
+                    is_edited=False,
+                    created_at=created_at,
+                    updated_at=None
+                )
+                gc_session.add(new_msg)
+                await gc_session.commit()
+                await gc_session.refresh(new_msg)
+        else:
+            new_msg = ChatMessageModel(
+                id=message_id,
+                sender_id=sender_id,
+                recipient_id=data.recipient_id,
+                content=data.content,
+                content_hash=content_hash,
+                is_edited=False,
+                created_at=created_at,
+                updated_at=None
+            )
+            session.add(new_msg)
+            await session.commit()
+            await session.refresh(new_msg)
+        
+        return MessageResponse(
             id=message_id,
             sender_id=sender_id,
+            sender_name=sender_name,
+            sender_avatar=sender_avatar,
             recipient_id=data.recipient_id,
             content=data.content,
             content_hash=content_hash,
-            is_edited=False,
             created_at=created_at,
+            is_edited=False,
             updated_at=None
-        )
-        
-        session.add(new_msg)
-        await session.commit()
-        await session.refresh(new_msg)
-        
-        return MessageResponse(
-            id=new_msg.id,
-            sender_id=new_msg.sender_id,
-            sender_name=sender_name,
-            sender_avatar=sender_avatar,
-            recipient_id=new_msg.recipient_id,
-            content=new_msg.content,
-            content_hash=new_msg.content_hash,
-            created_at=new_msg.created_at,
-            is_edited=new_msg.is_edited,
-            updated_at=new_msg.updated_at
         )
 
     @staticmethod
     async def get_messages(session: AsyncSession, user_id: UUID, recipient_id: str, limit: int = 100) -> List[MessageResponse]:
         if recipient_id == "global":
-            conditions = [ChatMessageModel.recipient_id == "global"]
-        else:
-            can_chat = await ChatService.can_users_chat(session, user_id, recipient_id)
-            if not can_chat:
-                return []
-
-            try:
-                recipient_uuid = UUID(recipient_id)
-            except ValueError:
-                return []
-
-            str_user_id = str(user_id)
-            str_recipient_id = str(recipient_uuid)
-
-            conditions = [
-                or_(
-                    and_(ChatMessageModel.sender_id == user_id, ChatMessageModel.recipient_id == str_recipient_id),
-                    and_(ChatMessageModel.sender_id == recipient_uuid, ChatMessageModel.recipient_id == str_user_id)
+            async with global_chat_db.session_factory() as gc_session:
+                gc_stmt = (
+                    select(GlobalChatMessageModel)
+                    .order_by(GlobalChatMessageModel.created_at.asc())
+                    .limit(limit)
                 )
-            ]
-            
+                gc_res = await gc_session.execute(gc_stmt)
+                gc_docs = gc_res.scalars().all()
+
+                # Lookup sender profiles from main user DB
+                sender_ids = list({m.sender_id for m in gc_docs})
+                senders_map = {}
+                if sender_ids:
+                    s_stmt = select(UserModel).where(UserModel.id.in_(sender_ids))
+                    s_res = await session.execute(s_stmt)
+                    s_users = s_res.scalars().all()
+                    senders_map = {u.id: u for u in s_users}
+
+                results = []
+                for msg in gc_docs:
+                    u = senders_map.get(msg.sender_id)
+                    s_name = u.username if u else "Unknown"
+                    s_avatar = u.avatar_url if u else None
+                    c_hash = msg.content_hash or hashlib.sha256(msg.content.encode("utf-8")).hexdigest()
+
+                    results.append(
+                        MessageResponse(
+                            id=msg.id,
+                            sender_id=msg.sender_id,
+                            sender_name=s_name,
+                            sender_avatar=s_avatar,
+                            recipient_id="global",
+                            content=msg.content,
+                            content_hash=c_hash,
+                            created_at=msg.created_at,
+                            is_edited=msg.is_edited,
+                            updated_at=msg.updated_at
+                        )
+                    )
+                return results
+
+        can_chat = await ChatService.can_users_chat(session, user_id, recipient_id)
+        if not can_chat:
+            return []
+
+        try:
+            recipient_uuid = UUID(recipient_id)
+        except ValueError:
+            return []
+
+        str_recipient_id = str(recipient_uuid)
+
         stmt = (
             select(ChatMessageModel)
             .options(selectinload(ChatMessageModel.sender))
-            .where(and_(*conditions))
+            .where(
+                or_(
+                    and_(ChatMessageModel.sender_id == user_id, ChatMessageModel.recipient_id == str_recipient_id),
+                    and_(ChatMessageModel.sender_id == recipient_uuid, ChatMessageModel.recipient_id == str(user_id))
+                )
+            )
             .order_by(ChatMessageModel.created_at.asc())
             .limit(limit)
         )
@@ -142,6 +195,45 @@ class ChatService:
         except ValueError:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
 
+        # Try global chat DB first
+        async with global_chat_db.session_factory() as gc_session:
+            gc_stmt = select(GlobalChatMessageModel).where(GlobalChatMessageModel.id == msg_uuid)
+            gc_res = await gc_session.execute(gc_stmt)
+            gc_msg = gc_res.scalar_one_or_none()
+
+            if gc_msg:
+                if gc_msg.sender_id != sender_id:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot edit someone else's message")
+
+                updated_at = datetime.now(timezone.utc)
+                c_hash = hashlib.sha256(new_content.encode("utf-8")).hexdigest()
+
+                gc_msg.content = new_content
+                gc_msg.content_hash = c_hash
+                gc_msg.is_edited = True
+                gc_msg.updated_at = updated_at
+
+                await gc_session.commit()
+                await gc_session.refresh(gc_msg)
+
+                s_stmt = select(UserModel).where(UserModel.id == sender_id)
+                s_res = await session.execute(s_stmt)
+                s_user = s_res.scalar_one_or_none()
+
+                return MessageResponse(
+                    id=gc_msg.id,
+                    sender_id=gc_msg.sender_id,
+                    sender_name=s_user.username if s_user else "Unknown",
+                    sender_avatar=s_user.avatar_url if s_user else None,
+                    recipient_id="global",
+                    content=gc_msg.content,
+                    content_hash=gc_msg.content_hash,
+                    created_at=gc_msg.created_at,
+                    is_edited=gc_msg.is_edited,
+                    updated_at=gc_msg.updated_at
+                )
+
+        # Fallback to main private chat DB
         stmt = select(ChatMessageModel).options(selectinload(ChatMessageModel.sender)).where(ChatMessageModel.id == msg_uuid)
         res = await session.execute(stmt)
         msg = res.scalar_one_or_none()
@@ -186,6 +278,27 @@ class ChatService:
         except ValueError:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
 
+        # Check global chat DB first
+        async with global_chat_db.session_factory() as gc_session:
+            gc_stmt = select(GlobalChatMessageModel).where(GlobalChatMessageModel.id == msg_uuid)
+            gc_res = await gc_session.execute(gc_stmt)
+            gc_msg = gc_res.scalar_one_or_none()
+
+            if gc_msg:
+                if gc_msg.sender_id != sender_id:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete someone else's message")
+
+                deleted_info = {
+                    "message_id": str(gc_msg.id),
+                    "recipient_id": "global",
+                    "sender_id": str(gc_msg.sender_id)
+                }
+
+                await gc_session.delete(gc_msg)
+                await gc_session.commit()
+                return deleted_info
+
+        # Fallback to main private chat DB
         stmt = select(ChatMessageModel).where(ChatMessageModel.id == msg_uuid)
         res = await session.execute(stmt)
         msg = res.scalar_one_or_none()

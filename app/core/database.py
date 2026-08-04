@@ -5,14 +5,16 @@ from app.models.base import Base
 import app.models.user
 import app.models.task
 import app.models.chat
+import app.models.global_chat
 
 class Database:
-    def __init__(self):
+    def __init__(self, get_default_url_fn):
+        self.get_default_url_fn = get_default_url_fn
         self.engine = None
         self.session_factory = None
 
     def connect_to_database(self, url: str | None = None):
-        db_url = url or settings.DATABASE_URL
+        db_url = url or self.get_default_url_fn()
         if db_url.startswith("postgresql://"):
             db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
@@ -50,10 +52,18 @@ class Database:
         if self.engine:
             await self.engine.dispose()
 
-db = Database()
+db = Database(lambda: settings.DATABASE_URL)
+global_chat_db = Database(lambda: settings.GLOBAL_CHAT_DATABASE_URL)
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with db.session_factory() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
+
+async def get_global_chat_db() -> AsyncGenerator[AsyncSession, None]:
+    async with global_chat_db.session_factory() as session:
         try:
             yield session
         finally:

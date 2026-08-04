@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.core.database import db
+from app.core.database import db, global_chat_db
 from app.routers.auth import router as auth_router
 from app.routers.tasks import router as tasks_router
 from app.routers.users import router as users_router
@@ -9,16 +9,20 @@ from app.routers.chat import router as chat_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Connect to DB and create tables
+    # Startup: Connect to main DB & global chat DB and create tables
     db.connect_to_database()
     await db.init_db()
+
+    global_chat_db.connect_to_database()
+    await global_chat_db.init_db()
     yield
-    # Shutdown: Close database connection
+    # Shutdown: Close database connections
     await db.close_database_connection()
+    await global_chat_db.close_database_connection()
 
 app = FastAPI(
     title="TODO Web Application Backend",
-    description="FastAPI + PostgreSQL backend for task management & real-time chat",
+    description="FastAPI + Multi-Database (PostgreSQL + Isolated Global Chat DB) backend",
     version="1.0.0",
     lifespan=lifespan
 )

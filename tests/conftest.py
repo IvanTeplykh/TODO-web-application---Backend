@@ -2,7 +2,7 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from app.main import app
-from app.core.database import db
+from app.core.database import db, global_chat_db
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -14,14 +14,18 @@ def event_loop():
 @pytest_asyncio.fixture(autouse=True)
 async def mock_database():
     """
-    Fixture initializing an in-memory SQLite database for complete test isolation.
+    Fixture initializing in-memory SQLite databases for complete test isolation.
     """
     db.connect_to_database("sqlite+aiosqlite:///:memory:")
     await db.init_db()
 
+    global_chat_db.connect_to_database("sqlite+aiosqlite:///:memory:")
+    await global_chat_db.init_db()
+
     yield db
 
     await db.close_database_connection()
+    await global_chat_db.close_database_connection()
 
 @pytest_asyncio.fixture
 async def async_client():
