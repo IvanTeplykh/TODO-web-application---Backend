@@ -4,14 +4,14 @@ from datetime import datetime
 from uuid import UUID
 
 class ChannelCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100, description="Channel title")
-    description: Optional[str] = Field(None, max_length=255, description="Channel description")
-    avatar_url: Optional[str] = Field(None, max_length=500, description="Channel avatar image URL")
+    name: str = Field(..., min_length=1, max_length=50, description="Channel title")
+    description: Optional[str] = Field(None, max_length=250, description="Channel description")
+    avatar_url: Optional[str] = Field(None, description="Channel avatar image URL")
 
 class ChannelUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=100)
-    description: Optional[str] = Field(None, max_length=255)
-    avatar_url: Optional[str] = Field(None, max_length=500)
+    name: Optional[str] = Field(None, min_length=1, max_length=50)
+    description: Optional[str] = Field(None, max_length=250)
+    avatar_url: Optional[str] = Field(None)
 
 class ChannelMemberResponse(BaseModel):
     id: UUID
