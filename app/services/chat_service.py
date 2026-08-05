@@ -59,7 +59,7 @@ class ChatService:
                 id=message_id,
                 sender_id=sender_id,
                 recipient_id="global",
-                encrypted_content=enc_content,
+                content=enc_content,
                 content_hash=content_hash,
                 is_edited=False,
                 created_at=created_at,
@@ -73,7 +73,7 @@ class ChatService:
                 id=message_id,
                 sender_id=sender_id,
                 recipient_id=data.recipient_id,
-                encrypted_content=enc_content,
+                content=enc_content,
                 content_hash=content_hash,
                 is_edited=False,
                 created_at=created_at,
@@ -112,7 +112,7 @@ class ChatService:
             for msg in gc_docs:
                 s_name = msg.sender.username if msg.sender else "Unknown"
                 s_avatar = msg.sender.avatar_url if msg.sender else None
-                plain_content = decrypt_text(msg.encrypted_content) or ""
+                plain_content = decrypt_text(msg.content) or ""
 
                 results.append(
                     MessageResponse(
@@ -122,7 +122,7 @@ class ChatService:
                         sender_avatar=s_avatar,
                         recipient_id="global",
                         content=plain_content,
-                        content_hash=msg.content_hash,
+                        content_hash=msg.content_hash or compute_hash(plain_content),
                         created_at=msg.created_at,
                         is_edited=msg.is_edited,
                         updated_at=msg.updated_at
@@ -160,7 +160,7 @@ class ChatService:
         for msg in docs:
             s_name = msg.sender.username if msg.sender else "Unknown"
             s_avatar = msg.sender.avatar_url if msg.sender else None
-            plain_content = decrypt_text(msg.encrypted_content) or ""
+            plain_content = decrypt_text(msg.content) or ""
 
             results.append(
                 MessageResponse(
@@ -170,7 +170,7 @@ class ChatService:
                     sender_avatar=s_avatar,
                     recipient_id=msg.recipient_id,
                     content=plain_content,
-                    content_hash=msg.content_hash,
+                    content_hash=msg.content_hash or compute_hash(plain_content),
                     created_at=msg.created_at,
                     is_edited=msg.is_edited,
                     updated_at=msg.updated_at
@@ -198,7 +198,7 @@ class ChatService:
             enc_content = encrypt_text(new_content)
             c_hash = compute_hash(new_content)
 
-            gc_msg.encrypted_content = enc_content
+            gc_msg.content = enc_content
             gc_msg.content_hash = c_hash
             gc_msg.is_edited = True
             gc_msg.updated_at = updated_at
@@ -237,7 +237,7 @@ class ChatService:
         enc_content = encrypt_text(new_content)
         c_hash = compute_hash(new_content)
         
-        msg.encrypted_content = enc_content
+        msg.content = enc_content
         msg.content_hash = c_hash
         msg.is_edited = True
         msg.updated_at = updated_at

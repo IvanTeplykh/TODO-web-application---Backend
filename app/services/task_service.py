@@ -14,8 +14,8 @@ from app.utils.encryption import encrypt_text, decrypt_text, compute_hash
 class TaskService:
     @staticmethod
     def _to_response(task: TaskModel) -> TaskResponse:
-        plain_title = decrypt_text(task.encrypted_title) or ""
-        plain_desc = decrypt_text(task.encrypted_description)
+        plain_title = decrypt_text(task.title) or ""
+        plain_desc = decrypt_text(task.description)
         
         t_hash = task.title_hash or compute_hash(plain_title)
         d_hash = task.description_hash or compute_hash(plain_desc)
@@ -53,13 +53,13 @@ class TaskService:
         new_task = TaskModel(
             id=task_id,
             owner_id=owner_id,
-            encrypted_title=enc_title,
+            title=enc_title,
             title_hash=t_hash,
             completed=False,
             completed_hash=c_hash,
             priority=task_in.priority,
             priority_hash=p_hash,
-            encrypted_description=enc_desc,
+            description=enc_desc,
             description_hash=d_hash,
             due_date=task_in.due_date,
             created_at=now,
@@ -98,8 +98,8 @@ class TaskService:
             conditions.append(or_(
                 TaskModel.title_hash == search_hash,
                 TaskModel.description_hash == search_hash,
-                TaskModel.title_hash.ilike(f"%{search}%"),
-                TaskModel.description_hash.ilike(f"%{search}%")
+                TaskModel.title.ilike(f"%{search}%"),
+                TaskModel.description.ilike(f"%{search}%")
             ))
             
         count_stmt = select(func.count(TaskModel.id)).where(and_(*conditions))
@@ -110,7 +110,7 @@ class TaskService:
             "priority": TaskModel.priority,
             "created_at": TaskModel.created_at,
             "updated_at": TaskModel.updated_at,
-            "title": TaskModel.title_hash,
+            "title": TaskModel.title,
             "completed": TaskModel.completed,
             "due_date": TaskModel.due_date
         }
@@ -177,13 +177,13 @@ class TaskService:
         p_hash = compute_hash(str(task_in.priority))
         c_hash = compute_hash(str(task_in.completed))
 
-        task.encrypted_title = enc_title
+        task.title = enc_title
         task.title_hash = t_hash
         task.priority = task_in.priority
         task.priority_hash = p_hash
         task.completed = task_in.completed
         task.completed_hash = c_hash
-        task.encrypted_description = enc_desc
+        task.description = enc_desc
         task.description_hash = d_hash
         task.due_date = task_in.due_date
         task.updated_at = datetime.now(timezone.utc)
