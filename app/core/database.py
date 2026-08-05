@@ -6,6 +6,7 @@ import app.models.user
 import app.models.task
 import app.models.chat
 import app.models.global_chat
+import app.models.channel
 
 from sqlalchemy import text
 
