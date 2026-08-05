@@ -92,3 +92,35 @@ async def test_edit_and_delete_message(async_client: AsyncClient, authenticated_
     # Delete message via API
     del_res = await async_client.delete(f"/api/v1/chat/messages/{msg_id}", headers=headers)
     assert del_res.status_code == 200
+
+@pytest.mark.asyncio
+async def test_global_chat_retention_auto_deletion(async_client: AsyncClient, authenticated_user: dict):
+    headers = authenticated_user["headers"]
+    from uuid import UUID
+    from datetime import datetime, timezone, timedelta
+    from app.core.database import db
+    from app.models.global_chat import GlobalChatMessageModel
+    from app.utils.encryption import encrypt_text, compute_hash
+
+    user_id = UUID(authenticated_user["user"]["id"])
+    old_date = datetime.now(timezone.utc) - timedelta(days=200)
+
+    # Insert an expired message older than 180 days directly into DB
+    async with db.session_factory() as session:
+        old_msg = GlobalChatMessageModel(
+            sender_id=user_id,
+            recipient_id="global",
+            content=encrypt_text("Expired message older than 180 days"),
+            content_hash=compute_hash("Expired message older than 180 days"),
+            is_edited=False,
+            created_at=old_date
+        )
+        session.add(old_msg)
+        await session.commit()
+
+    # Fetching global messages triggers auto-cleanup
+    res = await async_client.get("/api/v1/chat/messages?recipient_id=global", headers=headers)
+    assert res.status_code == 200
+    messages = res.json()
+    contents = [m["content"] for m in messages]
+    assert "Expired message older than 180 days" not in contents

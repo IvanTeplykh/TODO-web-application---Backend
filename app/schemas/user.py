@@ -12,6 +12,7 @@ class UserResponse(BaseModel):
     username: str
     email: EmailStr
     avatar_url: str | None = None
+    chat_retention_days: int = 180
 
     class Config:
         from_attributes = True
@@ -19,6 +20,7 @@ class UserResponse(BaseModel):
 class UserUpdate(BaseModel):
     username: str
     avatar_url: str | None = None
+    chat_retention_days: int = 180
 
 class UserRegisterResponse(BaseModel):
     message: str

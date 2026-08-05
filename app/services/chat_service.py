@@ -1,11 +1,10 @@
 import uuid
-import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_
+from sqlalchemy import select, or_, and_, delete
 from sqlalchemy.orm import selectinload
 from app.models.user import UserModel
 from app.models.chat import ChatRequestModel, ChatMessageModel
@@ -14,7 +13,16 @@ from app.core.connection_manager import connection_manager
 from app.schemas.chat import MessageCreate, MessageResponse, ChatUser, ChatRequestResponse
 from app.utils.encryption import encrypt_text, decrypt_text, compute_hash
 
+GLOBAL_CHAT_RETENTION_DAYS = 180
+
 class ChatService:
+    @staticmethod
+    async def cleanup_expired_global_messages(session: AsyncSession) -> int:
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=GLOBAL_CHAT_RETENTION_DAYS)
+        stmt = delete(GlobalChatMessageModel).where(GlobalChatMessageModel.created_at < cutoff_date)
+        res = await session.execute(stmt)
+        return res.rowcount or 0
+
     @staticmethod
     async def can_users_chat(session: AsyncSession, user_a: UUID, recipient_id_str: str) -> bool:
         if recipient_id_str == "global":
@@ -55,6 +63,9 @@ class ChatService:
         sender_avatar = sender_user.avatar_url if sender_user else None
 
         if data.recipient_id == "global":
+            # Auto-cleanup expired global chat messages older than 180 days
+            await ChatService.cleanup_expired_global_messages(session)
+
             new_msg = GlobalChatMessageModel(
                 id=message_id,
                 sender_id=sender_id,
@@ -99,9 +110,14 @@ class ChatService:
     @staticmethod
     async def get_messages(session: AsyncSession, user_id: UUID, recipient_id: str, limit: int = 100) -> List[MessageResponse]:
         if recipient_id == "global":
+            # Auto-delete & filter messages older than 180 days
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=GLOBAL_CHAT_RETENTION_DAYS)
+            await ChatService.cleanup_expired_global_messages(session)
+
             gc_stmt = (
                 select(GlobalChatMessageModel)
                 .options(selectinload(GlobalChatMessageModel.sender))
+                .where(GlobalChatMessageModel.created_at >= cutoff_date)
                 .order_by(GlobalChatMessageModel.created_at.asc())
                 .limit(limit)
             )
@@ -141,15 +157,34 @@ class ChatService:
 
         str_recipient_id = str(recipient_uuid)
 
+        # Check user's configured private chat retention days
+        u_stmt = select(UserModel).where(UserModel.id == user_id)
+        u_res = await session.execute(u_stmt)
+        curr_user = u_res.scalar_one_or_none()
+        retention_days = getattr(curr_user, 'chat_retention_days', 180) if curr_user else 180
+
+        chat_conditions = [
+            or_(
+                and_(ChatMessageModel.sender_id == user_id, ChatMessageModel.recipient_id == str_recipient_id),
+                and_(ChatMessageModel.sender_id == recipient_uuid, ChatMessageModel.recipient_id == str(user_id))
+            )
+        ]
+
+        if retention_days > 0:
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+            del_stmt = delete(ChatMessageModel).where(
+                and_(
+                    or_(ChatMessageModel.sender_id == user_id, ChatMessageModel.recipient_id == str(user_id)),
+                    ChatMessageModel.created_at < cutoff_date
+                )
+            )
+            await session.execute(del_stmt)
+            chat_conditions.append(ChatMessageModel.created_at >= cutoff_date)
+
         stmt = (
             select(ChatMessageModel)
             .options(selectinload(ChatMessageModel.sender))
-            .where(
-                or_(
-                    and_(ChatMessageModel.sender_id == user_id, ChatMessageModel.recipient_id == str_recipient_id),
-                    and_(ChatMessageModel.sender_id == recipient_uuid, ChatMessageModel.recipient_id == str(user_id))
-                )
-            )
+            .where(and_(*chat_conditions))
             .order_by(ChatMessageModel.created_at.asc())
             .limit(limit)
         )

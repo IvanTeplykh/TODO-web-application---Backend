@@ -26,6 +26,7 @@ async def update_profile(
 
     user_db.username = profile_in.username
     user_db.avatar_url = profile_in.avatar_url
+    user_db.chat_retention_days = profile_in.chat_retention_days
     await session.commit()
     await session.refresh(user_db)
 
@@ -41,7 +42,8 @@ async def update_profile(
         id=user_db.id,
         username=user_db.username,
         email=user_db.email,
-        avatar_url=user_db.avatar_url
+        avatar_url=user_db.avatar_url,
+        chat_retention_days=user_db.chat_retention_days
     )
 
 @router.post("/change-password")
