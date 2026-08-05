@@ -7,6 +7,8 @@ import app.models.task
 import app.models.chat
 import app.models.global_chat
 
+from sqlalchemy import text
+
 class Database:
     def __init__(self):
         self.engine = None
@@ -46,6 +48,10 @@ class Database:
         if self.engine:
             async with self.engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                try:
+                    await conn.execute(text("ALTER TABLE users ADD COLUMN chat_retention_days INTEGER DEFAULT 180;"))
+                except Exception:
+                    pass
 
     async def close_database_connection(self):
         if self.engine:
