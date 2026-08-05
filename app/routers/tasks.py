@@ -1,8 +1,18 @@
 from fastapi import APIRouter, Depends, Query, status
 from uuid import UUID
+from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.schemas.task import TaskCreate, TaskUpdate, TaskStatusUpdate, TaskResponse
+from app.schemas.task import (
+    TaskCreate,
+    TaskUpdate,
+    TaskStatusUpdate,
+    TaskResponse,
+    TaskShareCreate,
+    TaskShareResponse,
+    TaskShareRespond,
+    TaskHistoryResponse
+)
 from app.schemas.user import UserResponse
 from app.services.task_service import TaskService
 from app.dependencies.auth import get_current_user
@@ -40,6 +50,28 @@ async def get_tasks(
         order=order
     )
 
+@router.get("/shares/pending", response_model=List[TaskShareResponse])
+async def get_pending_task_shares(
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    return await TaskService.get_pending_share_requests(session, current_user.id)
+
+@router.post("/shares/{request_id}/respond")
+async def respond_task_share(
+    request_id: UUID,
+    payload: TaskShareRespond,
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    return await TaskService.respond_share_request(
+        session,
+        request_id,
+        current_user.id,
+        payload.passcode,
+        payload.action
+    )
+
 @router.get("/{task_id}", response_model=TaskResponse)
 async def get_task(
     task_id: UUID,
@@ -73,3 +105,29 @@ async def delete_task(
     session: AsyncSession = Depends(get_db)
 ):
     await TaskService.delete_task(session, task_id, owner_id=current_user.id)
+
+@router.post("/{task_id}/share", response_model=TaskShareResponse, status_code=status.HTTP_201_CREATED)
+async def share_task(
+    task_id: UUID,
+    payload: TaskShareCreate,
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    return await TaskService.create_share_request(session, task_id, current_user.id, payload)
+
+@router.get("/{task_id}/history", response_model=List[TaskHistoryResponse])
+async def get_task_history(
+    task_id: UUID,
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    return await TaskService.get_task_history(session, task_id, current_user.id)
+
+@router.delete("/{task_id}/collaborators/{target_user_id}")
+async def remove_collaborator(
+    task_id: UUID,
+    target_user_id: UUID,
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    return await TaskService.remove_collaborator(session, task_id, current_user.id, target_user_id)

@@ -7,6 +7,7 @@ import app.models.task
 import app.models.chat
 import app.models.global_chat
 import app.models.channel
+import app.models.task_collaborator
 
 from sqlalchemy import text
 

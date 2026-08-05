@@ -1,5 +1,6 @@
 from datetime import datetime
 from uuid import UUID
+from typing import Optional, List, Literal
 from pydantic import BaseModel, Field, ConfigDict
 
 class TaskCreate(BaseModel):
@@ -18,7 +19,49 @@ class TaskUpdate(BaseModel):
 class TaskStatusUpdate(BaseModel):
     completed: bool
 
-from typing import Optional
+class TaskCollaboratorResponse(BaseModel):
+    id: UUID
+    user_id: UUID
+    username: str
+    avatar_url: Optional[str] = None
+    access_level: str # status_only, full_access
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class TaskShareCreate(BaseModel):
+    target_username: str = Field(..., min_length=1, description="Username to share/transfer task to")
+    access_level: Literal["transfer", "status_only", "full_access"]
+
+class TaskShareResponse(BaseModel):
+    id: UUID
+    task_id: UUID
+    task_title: str
+    owner_id: UUID
+    owner_username: str
+    target_user_id: UUID
+    target_username: str
+    access_level: str # transfer, status_only, full_access
+    passcode: Optional[str] = None # Returned to owner when created
+    status: str # pending, accepted, declined
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class TaskShareRespond(BaseModel):
+    passcode: str = Field(..., min_length=1, description="Passcode provided by owner")
+    action: Literal["accept", "decline"]
+
+class TaskHistoryResponse(BaseModel):
+    id: UUID
+    task_id: UUID
+    actor_id: UUID
+    actor_name: str
+    action: str
+    details: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 class TaskResponse(BaseModel):
     id: UUID
@@ -34,5 +77,8 @@ class TaskResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     owner_id: UUID
+    owner_username: Optional[str] = None
+    my_access_level: str = "owner" # owner, full_access, status_only
+    collaborators: List[TaskCollaboratorResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
