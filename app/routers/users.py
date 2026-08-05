@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, status, HTTPException
+from fastapi import APIRouter, Depends, status, HTTPException, Query
+from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from app.schemas.user import UserResponse, UserUpdate, ChangePasswordRequest, VerifyPasswordRequest
 from app.dependencies.auth import get_current_user
 from app.core.database import get_db
@@ -9,6 +10,39 @@ from app.core.security import verify_password, get_password_hash
 from app.core.connection_manager import connection_manager
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+@router.get("/search", response_model=List[UserResponse])
+async def search_users(
+    q: str = Query("", min_length=0),
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    if not q or not q.strip():
+        return []
+
+    stmt = (
+        select(UserModel)
+        .where(
+            and_(
+                UserModel.username.ilike(f"%{q.strip()}%"),
+                UserModel.id != current_user.id
+            )
+        )
+        .limit(10)
+    )
+    res = await session.execute(stmt)
+    users = res.scalars().all()
+
+    return [
+        UserResponse(
+            id=u.id,
+            username=u.username,
+            email=u.email,
+            avatar_url=u.avatar_url,
+            chat_retention_days=u.chat_retention_days
+        )
+        for u in users
+    ]
 
 @router.put("/me", response_model=UserResponse)
 @router.patch("/me", response_model=UserResponse)
