@@ -98,5 +98,7 @@ class TaskResponse(BaseModel):
     owner_username: Optional[str] = None
     my_access_level: str = "owner" # owner, full_access, status_only
     collaborators: List[TaskCollaboratorResponse] = []
+    has_unread_comments: bool = False
+    unread_comments_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)

@@ -10,7 +10,7 @@ from sqlalchemy import select, func, desc, asc, and_, or_
 from sqlalchemy.orm import selectinload
 
 from app.models.task import TaskModel
-from app.models.task_collaborator import TaskCollaboratorModel, TaskShareRequestModel, TaskHistoryModel, TaskCommentModel
+from app.models.task_collaborator import TaskCollaboratorModel, TaskShareRequestModel, TaskHistoryModel, TaskCommentModel, TaskReadStatusModel
 from app.models.user import UserModel
 from app.schemas.task import (
     TaskCreate,
@@ -98,6 +98,24 @@ class TaskService:
                 )
             )
 
+        # Unread comments check
+        read_stmt = select(TaskReadStatusModel.last_read_at).where(
+            and_(TaskReadStatusModel.task_id == task.id, TaskReadStatusModel.user_id == current_user_id)
+        )
+        read_res = await session.execute(read_stmt)
+        last_read_at = read_res.scalar_one_or_none()
+
+        unread_conds = [
+            TaskCommentModel.task_id == task.id,
+            TaskCommentModel.user_id != current_user_id
+        ]
+        if last_read_at:
+            unread_conds.append(TaskCommentModel.created_at > last_read_at)
+
+        unread_stmt = select(func.count(TaskCommentModel.id)).where(and_(*unread_conds))
+        unread_res = await session.execute(unread_stmt)
+        unread_count = unread_res.scalar() or 0
+
         return TaskResponse(
             id=task.id,
             title=plain_title,
@@ -114,7 +132,9 @@ class TaskService:
             owner_id=task.owner_id,
             owner_username=owner_name,
             my_access_level=my_access_level,
-            collaborators=collab_responses
+            collaborators=collab_responses,
+            has_unread_comments=(unread_count > 0),
+            unread_comments_count=unread_count
         )
 
     @staticmethod
@@ -498,11 +518,12 @@ class TaskService:
             req.status = "accepted"
 
             if req.access_level == "transfer":
+                old_owner_id = req.owner_id
                 old_owner_name = req.owner.username if req.owner else "previous owner"
                 new_owner_name = req.target_user.username if req.target_user else "new owner"
                 req.task.owner_id = user_id
                 
-                # Clean up existing collaborator record if present
+                # Clean up existing collaborator record for new owner if present
                 del_collab = select(TaskCollaboratorModel).where(
                     and_(TaskCollaboratorModel.task_id == req.task_id, TaskCollaboratorModel.user_id == user_id)
                 )
@@ -511,12 +532,30 @@ class TaskService:
                 if existing_c:
                     await session.delete(existing_c)
 
+                # Add old owner as a full_access collaborator
+                old_c_stmt = select(TaskCollaboratorModel).where(
+                    and_(TaskCollaboratorModel.task_id == req.task_id, TaskCollaboratorModel.user_id == old_owner_id)
+                )
+                old_c_res = await session.execute(old_c_stmt)
+                old_c = old_c_res.scalar_one_or_none()
+                if old_c:
+                    old_c.access_level = "full_access"
+                else:
+                    new_c = TaskCollaboratorModel(
+                        id=uuid.uuid4(),
+                        task_id=req.task_id,
+                        user_id=old_owner_id,
+                        access_level="full_access",
+                        created_at=datetime.now(timezone.utc)
+                    )
+                    session.add(new_c)
+
                 await TaskService.record_history(
                     session,
                     req.task_id,
                     user_id,
                     "ownership_transferred",
-                    f"Ownership transferred from @{old_owner_name} to @{new_owner_name}"
+                    f"Ownership transferred from @{old_owner_name} to @{new_owner_name}. @{old_owner_name} is now a collaborator."
                 )
             else:
                 # Add or update collaborator
@@ -610,6 +649,25 @@ class TaskService:
     @staticmethod
     async def get_task_comments(session: AsyncSession, task_id: UUID, user_id: UUID) -> List[TaskCommentResponse]:
         await TaskService.get_task_by_id(session, task_id, user_id)
+
+        # Mark comments as read for user
+        read_stmt = select(TaskReadStatusModel).where(
+            and_(TaskReadStatusModel.task_id == task_id, TaskReadStatusModel.user_id == user_id)
+        )
+        read_res = await session.execute(read_stmt)
+        read_status = read_res.scalar_one_or_none()
+        now = datetime.now(timezone.utc)
+        if read_status:
+            read_status.last_read_at = now
+        else:
+            read_status = TaskReadStatusModel(
+                id=uuid.uuid4(),
+                task_id=task_id,
+                user_id=user_id,
+                last_read_at=now
+            )
+            session.add(read_status)
+        await session.commit()
 
         stmt = (
             select(TaskCommentModel)

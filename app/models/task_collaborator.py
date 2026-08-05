@@ -127,3 +127,28 @@ class TaskCommentModel(Base):
 
     task = relationship("TaskModel", back_populates="comments")
     author = relationship("UserModel", foreign_keys=[user_id])
+
+class TaskReadStatusModel(Base):
+    __tablename__ = "task_read_statuses"
+    __table_args__ = (
+        UniqueConstraint("task_id", "user_id", name="uq_task_user_read_status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        GUID,
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False
+    )
+    last_read_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )

@@ -94,6 +94,15 @@ class Database:
                     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS task_read_statuses (
+                    id UUID PRIMARY KEY,
+                    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    last_read_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_task_user_read_status UNIQUE (task_id, user_id)
+                );
                 """
             ]
             for sql_stmt in table_sqls:

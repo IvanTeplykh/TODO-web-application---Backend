@@ -169,6 +169,11 @@ async def test_task_transfer_ownership_flow(async_client: AsyncClient, authentic
     assert get_task_res.status_code == 200
     assert get_task_res.json()["my_access_level"] == "owner"
 
+    # 5b. Verify User 1 (old owner) is now a full_access collaborator
+    get_task_old_owner = await async_client.get(f"/api/v1/tasks/{task_id}", headers=headers1)
+    assert get_task_old_owner.status_code == 200
+    assert get_task_old_owner.json()["my_access_level"] == "full_access"
+
     # 6. User 3 can delete task
     del_res = await async_client.delete(f"/api/v1/tasks/{task_id}", headers=headers3)
     assert del_res.status_code == 204
