@@ -27,6 +27,7 @@ from app.schemas.task import (
 )
 from app.utils.pagination import PaginatedResponse
 from app.utils.encryption import encrypt_text, decrypt_text, compute_hash
+from app.core.connection_manager import connection_manager
 
 class TaskService:
     @staticmethod
@@ -416,6 +417,18 @@ class TaskService:
         await session.commit()
         await session.refresh(share_req)
 
+        await connection_manager.send_personal_message(
+            {
+                "type": "task_share_requested",
+                "request_id": str(share_req.id),
+                "task_id": str(task.id),
+                "task_title": plain_title,
+                "owner_username": task.owner.username if task.owner else "Owner",
+                "access_level": share_req.access_level
+            },
+            str(target_user.id)
+        )
+
         return TaskShareResponse(
             id=share_req.id,
             task_id=task.id,
@@ -532,20 +545,20 @@ class TaskService:
                 if existing_c:
                     await session.delete(existing_c)
 
-                # Add old owner as a full_access collaborator
+                # Add old owner as a status_only collaborator
                 old_c_stmt = select(TaskCollaboratorModel).where(
                     and_(TaskCollaboratorModel.task_id == req.task_id, TaskCollaboratorModel.user_id == old_owner_id)
                 )
                 old_c_res = await session.execute(old_c_stmt)
                 old_c = old_c_res.scalar_one_or_none()
                 if old_c:
-                    old_c.access_level = "full_access"
+                    old_c.access_level = "status_only"
                 else:
                     new_c = TaskCollaboratorModel(
                         id=uuid.uuid4(),
                         task_id=req.task_id,
                         user_id=old_owner_id,
-                        access_level="full_access",
+                        access_level="status_only",
                         created_at=datetime.now(timezone.utc)
                     )
                     session.add(new_c)
@@ -555,7 +568,7 @@ class TaskService:
                     req.task_id,
                     user_id,
                     "ownership_transferred",
-                    f"Ownership transferred from @{old_owner_name} to @{new_owner_name}. @{old_owner_name} is now a collaborator."
+                    f"Ownership transferred from @{old_owner_name} to @{new_owner_name}. @{old_owner_name} is now a status-only collaborator."
                 )
             else:
                 # Add or update collaborator
@@ -586,6 +599,30 @@ class TaskService:
                 )
 
             await session.commit()
+
+            plain_title = decrypt_text(req.task.title) if req.task else "Task"
+            await connection_manager.send_personal_message(
+                {
+                    "type": "task_share_responded",
+                    "request_id": str(request_id),
+                    "task_id": str(req.task_id),
+                    "task_title": plain_title,
+                    "action": action,
+                    "target_username": req.target_user.username if req.target_user else "User"
+                },
+                str(req.owner_id)
+            )
+            await connection_manager.send_personal_message(
+                {
+                    "type": "task_share_responded",
+                    "request_id": str(request_id),
+                    "task_id": str(req.task_id),
+                    "task_title": plain_title,
+                    "action": action
+                },
+                str(user_id)
+            )
+
             return {"message": "Task share request accepted", "status": "accepted", "task_id": str(req.task_id)}
 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid action")
@@ -644,6 +681,15 @@ class TaskService:
         await session.delete(collab)
         await TaskService.record_history(session, task_id, owner_id, "collaborator_removed", f"Removed collaborator @{target_name}")
         await session.commit()
+
+        await connection_manager.send_personal_message(
+            {
+                "type": "task_collaborator_removed",
+                "task_id": str(task_id)
+            },
+            str(target_user_id)
+        )
+
         return {"message": f"Collaborator @{target_name} removed"}
 
     @staticmethod
@@ -724,6 +770,33 @@ class TaskService:
 
         await session.commit()
         await session.refresh(comment)
+
+        # Broadcast real-time comment notification to owner & collaborators
+        task_stmt = (
+            select(TaskModel)
+            .options(selectinload(TaskModel.collaborators))
+            .where(TaskModel.id == task_id)
+        )
+        task_res = await session.execute(task_stmt)
+        task_db = task_res.scalar_one_or_none()
+
+        if task_db:
+            target_ids = set()
+            if task_db.owner_id != user_id:
+                target_ids.add(str(task_db.owner_id))
+            for c in task_db.collaborators:
+                if c.user_id != user_id:
+                    target_ids.add(str(c.user_id))
+
+            for tid in target_ids:
+                await connection_manager.send_personal_message(
+                    {
+                        "type": "task_comment_added",
+                        "task_id": str(task_id),
+                        "author_name": user.username if user else "User"
+                    },
+                    tid
+                )
 
         return TaskCommentResponse(
             id=comment.id,
