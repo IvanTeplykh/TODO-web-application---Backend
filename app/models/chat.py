@@ -45,8 +45,7 @@ class ChatMessageModel(Base):
         nullable=False
     )
     recipient_id: Mapped[str] = mapped_column(String(50), index=True, nullable=False) # 'global' or user UUID string
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     is_edited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

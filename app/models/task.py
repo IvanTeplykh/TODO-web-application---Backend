@@ -15,13 +15,11 @@ class TaskModel(Base):
         index=True,
         nullable=False
     )
-    title: Mapped[str] = mapped_column(String(100), nullable=False)
-    title_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    title_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     completed: Mapped[bool] = mapped_column(Boolean, default=False, index=True, nullable=False)
     completed_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, default=5, index=True, nullable=False)
     priority_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     description_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

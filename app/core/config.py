@@ -7,7 +7,6 @@ class Settings(BaseSettings):
     REMEMBER_ME_EXPIRE_DAYS: int = 30
     DEFAULT_TOKEN_EXPIRE_DAYS: int = 1
     DATABASE_URL: str = "sqlite+aiosqlite:///./todo.db"
-    GLOBAL_CHAT_DATABASE_URL: str = "sqlite+aiosqlite:///./global_chat.db"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

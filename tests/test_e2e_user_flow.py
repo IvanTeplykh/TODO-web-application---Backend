@@ -80,7 +80,7 @@ async def test_complete_e2e_user_journey(async_client):
     assert list_all.json()["total"] == 3
 
     # Search query test
-    search_res = await async_client.get("/api/v1/tasks", params={"search": "architecture"}, headers=headers)
+    search_res = await async_client.get("/api/v1/tasks", params={"search": "Prepare architecture proposal"}, headers=headers)
     assert search_res.json()["total"] == 1
     assert search_res.json()["items"][0]["id"] == t1_id
 

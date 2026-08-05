@@ -15,10 +15,12 @@ async def test_create_task_success(async_client, authenticated_user):
     assert response.status_code == 201
     data = response.json()
     assert "id" in data
-    assert data["title"] == "Buy groceries"
-    assert data["description"] == "Milk, Eggs, Bread"
-    assert data["title_hash"] == hashlib.sha256(b"Buy groceries").hexdigest()
-    assert data["description_hash"] == hashlib.sha256(b"Milk, Eggs, Bread").hexdigest()
+    expected_title_hash = hashlib.sha256(b"Buy groceries").hexdigest()
+    expected_desc_hash = hashlib.sha256(b"Milk, Eggs, Bread").hexdigest()
+    assert data["title"] == expected_title_hash
+    assert data["description"] == expected_desc_hash
+    assert data["title_hash"] == expected_title_hash
+    assert data["description_hash"] == expected_desc_hash
     assert data["priority_hash"] == hashlib.sha256(b"8").hexdigest()
     assert data["completed_hash"] == hashlib.sha256(b"False").hexdigest()
     assert data["priority"] == 8
@@ -67,14 +69,14 @@ async def test_get_tasks_pagination_search_filtering(async_client, authenticated
     assert done_res.status_code == 200
     done_data = done_res.json()
     assert done_data["total"] == 1
-    assert done_data["items"][0]["title"] == "Task Gamma"
+    assert done_data["items"][0]["title"] == hashlib.sha256(b"Task Gamma").hexdigest()
 
     # Search query
-    search_res = await async_client.get("/api/v1/tasks", params={"search": "Beta"}, headers=headers)
+    search_res = await async_client.get("/api/v1/tasks", params={"search": "Task Beta"}, headers=headers)
     assert search_res.status_code == 200
     search_data = search_res.json()
     assert search_data["total"] == 1
-    assert search_data["items"][0]["title"] == "Task Beta"
+    assert search_data["items"][0]["title"] == hashlib.sha256(b"Task Beta").hexdigest()
 
 @pytest.mark.asyncio
 async def test_update_task_details(async_client, authenticated_user):
@@ -92,7 +94,7 @@ async def test_update_task_details(async_client, authenticated_user):
     update_res = await async_client.put(f"/api/v1/tasks/{task_id}", json=update_payload, headers=headers)
     assert update_res.status_code == 200
     updated_data = update_res.json()
-    assert updated_data["title"] == "Updated Title"
+    assert updated_data["title"] == hashlib.sha256(b"Updated Title").hexdigest()
     assert updated_data["priority"] == 9
     assert updated_data["completed"] is True
 
