@@ -19,6 +19,7 @@ class ChannelMemberResponse(BaseModel):
     username: str
     avatar_url: Optional[str] = None
     role: str # owner, admin, member
+    status: str = "accepted" # pending, accepted
     joined_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -36,7 +37,16 @@ class ChannelResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class AddMemberRequest(BaseModel):
-    user_id: UUID
+    user_id: Optional[UUID] = None
+    username: Optional[str] = None
+
+class ChannelInviteResponse(BaseModel):
+    id: UUID
+    channel_id: UUID
+    channel_name: str
+    channel_description: Optional[str] = None
+    channel_avatar: Optional[str] = None
+    created_at: datetime
 
 class UpdateMemberRoleRequest(BaseModel):
     role: Literal["admin", "member"]

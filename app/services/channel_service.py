@@ -14,6 +14,7 @@ from app.schemas.channel import (
     ChannelUpdate,
     ChannelResponse,
     ChannelMemberResponse,
+    ChannelInviteResponse,
     ChannelMessageResponse
 )
 from app.utils.encryption import encrypt_text, decrypt_text, compute_hash
@@ -24,7 +25,8 @@ class ChannelService:
         stmt = select(ChannelMemberModel.role).where(
             and_(
                 ChannelMemberModel.channel_id == channel_id,
-                ChannelMemberModel.user_id == user_id
+                ChannelMemberModel.user_id == user_id,
+                ChannelMemberModel.status == "accepted"
             )
         )
         res = await session.execute(stmt)
@@ -55,6 +57,7 @@ class ChannelService:
             channel_id=channel_id,
             user_id=owner_id,
             role="owner",
+            status="accepted",
             joined_at=now
         )
         session.add(owner_member)
@@ -78,7 +81,12 @@ class ChannelService:
         stmt = (
             select(ChannelModel, ChannelMemberModel.role)
             .join(ChannelMemberModel, ChannelMemberModel.channel_id == ChannelModel.id)
-            .where(ChannelMemberModel.user_id == user_id)
+            .where(
+                and_(
+                    ChannelMemberModel.user_id == user_id,
+                    ChannelMemberModel.status == "accepted"
+                )
+            )
             .order_by(ChannelModel.created_at.desc())
         )
         res = await session.execute(stmt)
@@ -130,6 +138,7 @@ class ChannelService:
                     username=u_name,
                     avatar_url=u_avatar,
                     role=m.role,
+                    status=m.status,
                     joined_at=m.joined_at
                 )
             )
@@ -192,29 +201,46 @@ class ChannelService:
         return {"message": "Channel deleted successfully", "id": str(channel_id)}
 
     @staticmethod
-    async def add_member(session: AsyncSession, channel_id: UUID, actor_id: UUID, target_user_id: UUID) -> ChannelMemberResponse:
+    async def add_member(
+        session: AsyncSession,
+        channel_id: UUID,
+        actor_id: UUID,
+        target_user_id: Optional[UUID] = None,
+        target_username: Optional[str] = None
+    ) -> ChannelMemberResponse:
         is_admin = await ChannelService.is_admin_or_owner(session, channel_id, actor_id)
         if not is_admin:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only channel admins/owners can add members")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only channel admins/owners can send invitations")
 
-        u_stmt = select(UserModel).where(UserModel.id == target_user_id)
+        if target_user_id:
+            u_stmt = select(UserModel).where(UserModel.id == target_user_id)
+        elif target_username:
+            u_stmt = select(UserModel).where(func.lower(UserModel.username) == target_username.strip().lower())
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User ID or username is required")
+
         u_res = await session.execute(u_stmt)
         target_user = u_res.scalar_one_or_none()
         if not target_user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         existing_stmt = select(ChannelMemberModel).where(
-            and_(ChannelMemberModel.channel_id == channel_id, ChannelMemberModel.user_id == target_user_id)
+            and_(ChannelMemberModel.channel_id == channel_id, ChannelMemberModel.user_id == target_user.id)
         )
         ex_res = await session.execute(existing_stmt)
-        if ex_res.scalar_one_or_none():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User is already a member of this channel")
+        existing_member = ex_res.scalar_one_or_none()
+        if existing_member:
+            if existing_member.status == "accepted":
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User is already a member of this channel")
+            else:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitation already sent to this user")
 
         new_member = ChannelMemberModel(
             id=uuid.uuid4(),
             channel_id=channel_id,
-            user_id=target_user_id,
+            user_id=target_user.id,
             role="member",
+            status="pending",
             joined_at=datetime.now(timezone.utc)
         )
         session.add(new_member)
@@ -223,12 +249,72 @@ class ChannelService:
 
         return ChannelMemberResponse(
             id=new_member.id,
-            user_id=target_user_id,
+            user_id=target_user.id,
             username=target_user.username,
             avatar_url=target_user.avatar_url,
             role="member",
+            status="pending",
             joined_at=new_member.joined_at
         )
+
+    @staticmethod
+    async def get_pending_invites(session: AsyncSession, user_id: UUID) -> List[ChannelInviteResponse]:
+        stmt = (
+            select(ChannelMemberModel)
+            .options(selectinload(ChannelMemberModel.channel))
+            .where(
+                and_(
+                    ChannelMemberModel.user_id == user_id,
+                    ChannelMemberModel.status == "pending"
+                )
+            )
+            .order_by(ChannelMemberModel.joined_at.desc())
+        )
+        res = await session.execute(stmt)
+        members = res.scalars().all()
+
+        results = []
+        for m in members:
+            if m.channel:
+                results.append(
+                    ChannelInviteResponse(
+                        id=m.id,
+                        channel_id=m.channel_id,
+                        channel_name=m.channel.name,
+                        channel_description=m.channel.description,
+                        channel_avatar=m.channel.avatar_url,
+                        created_at=m.joined_at
+                    )
+                )
+        return results
+
+    @staticmethod
+    async def respond_to_invite(session: AsyncSession, invite_id: UUID, user_id: UUID, action: str) -> dict:
+        stmt = select(ChannelMemberModel).where(
+            and_(
+                ChannelMemberModel.id == invite_id,
+                ChannelMemberModel.user_id == user_id,
+                ChannelMemberModel.status == "pending"
+            )
+        )
+        res = await session.execute(stmt)
+        member = res.scalar_one_or_none()
+
+        if not member:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel invitation not found")
+
+        ch_id = member.channel_id
+
+        if action == "accept":
+            member.status = "accepted"
+            await session.commit()
+            return {"message": "Channel invitation accepted", "channel_id": str(ch_id), "status": "accepted"}
+        elif action == "decline":
+            await session.delete(member)
+            await session.commit()
+            return {"message": "Channel invitation declined", "channel_id": str(ch_id), "status": "declined"}
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid action")
 
     @staticmethod
     async def remove_member(session: AsyncSession, channel_id: UUID, actor_id: UUID, target_user_id: UUID) -> dict:
@@ -286,6 +372,7 @@ class ChannelService:
             username=u_name,
             avatar_url=u_avatar,
             role=target_member.role,
+            status=target_member.status,
             joined_at=target_member.joined_at
         )
 

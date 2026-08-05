@@ -48,6 +48,7 @@ class ChannelMemberModel(Base):
         nullable=False
     )
     role: Mapped[str] = mapped_column(String(20), default="member", nullable=False) # owner, admin, member
+    status: Mapped[str] = mapped_column(String(20), default="accepted", server_default="accepted", nullable=False) # pending, accepted
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

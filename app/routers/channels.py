@@ -11,6 +11,7 @@ from app.schemas.channel import (
     ChannelUpdate,
     ChannelResponse,
     ChannelMemberResponse,
+    ChannelInviteResponse,
     AddMemberRequest,
     UpdateMemberRoleRequest,
     ChannelMessageCreate,
@@ -73,6 +74,29 @@ async def delete_channel(
     })
     return res
 
+@router.get("/invites/pending", response_model=List[ChannelInviteResponse])
+async def get_my_pending_channel_invites(
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    return await channel_service.get_pending_invites(session, current_user.id)
+
+@router.post("/invites/{invite_id}/respond")
+async def respond_channel_invite(
+    invite_id: UUID,
+    action: str = Query(..., regex="^(accept|decline)$"),
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    res = await channel_service.respond_to_invite(session, invite_id, current_user.id, action)
+    await connection_manager.broadcast({
+        "type": "channel_invite_responded",
+        "user_id": str(current_user.id),
+        "invite_id": str(invite_id),
+        "action": action
+    })
+    return res
+
 @router.post("/{channel_id}/members", response_model=ChannelMemberResponse, status_code=status.HTTP_201_CREATED)
 async def add_member(
     channel_id: UUID,
@@ -80,9 +104,15 @@ async def add_member(
     current_user: UserResponse = Depends(get_current_user),
     session: AsyncSession = Depends(get_db)
 ):
-    res = await channel_service.add_member(session, channel_id, current_user.id, data.user_id)
+    res = await channel_service.add_member(
+        session,
+        channel_id,
+        current_user.id,
+        target_user_id=data.user_id,
+        target_username=data.username
+    )
     await connection_manager.broadcast({
-        "type": "channel_member_added",
+        "type": "channel_invite_sent",
         "channel_id": str(channel_id),
         "member": res.model_dump(mode="json")
     })
