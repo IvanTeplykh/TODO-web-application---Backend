@@ -153,7 +153,7 @@ class ChannelService:
         if data.description is not None:
             channel.description = data.description.strip() if data.description else None
         if data.avatar_url is not None:
-            channel.avatar_url = data.avatar_url.strip() if data.avatar_url else None
+            channel.avatar_url = data.avatar_url.strip() if data.avatar_url and data.avatar_url.strip() else None
 
         await session.commit()
         await session.refresh(channel)
