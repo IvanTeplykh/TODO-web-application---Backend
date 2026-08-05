@@ -86,8 +86,7 @@ async def test_edit_and_delete_message(async_client: AsyncClient, authenticated_
     edit_res = await async_client.patch(f"/api/v1/chat/messages/{msg_id}", json={"content": "Edited Message"}, headers=headers)
     assert edit_res.status_code == 200
     edited_data = edit_res.json()
-    import hashlib
-    assert edited_data["content"] == hashlib.sha256(b"Edited Message").hexdigest()
+    assert edited_data["content"] == "Edited Message"
     assert edited_data["is_edited"] is True
 
     # Delete message via API

@@ -1,6 +1,5 @@
 import uuid
 import math
-import hashlib
 from datetime import datetime, timezone
 from uuid import UUID
 from typing import Optional
@@ -10,29 +9,28 @@ from sqlalchemy import select, func, desc, asc, and_, or_
 from app.models.task import TaskModel
 from app.schemas.task import TaskCreate, TaskUpdate, TaskStatusUpdate, TaskResponse
 from app.utils.pagination import PaginatedResponse
-
-def compute_hash(text: Optional[str]) -> Optional[str]:
-    if text is None:
-        return None
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+from app.utils.encryption import encrypt_text, decrypt_text, compute_hash
 
 class TaskService:
     @staticmethod
     def _to_response(task: TaskModel) -> TaskResponse:
-        t_hash = task.title_hash
-        d_hash = task.description_hash
+        plain_title = decrypt_text(task.encrypted_title) or ""
+        plain_desc = decrypt_text(task.encrypted_description)
+        
+        t_hash = task.title_hash or compute_hash(plain_title)
+        d_hash = task.description_hash or compute_hash(plain_desc)
         p_hash = task.priority_hash or compute_hash(str(task.priority))
         c_hash = task.completed_hash or compute_hash(str(task.completed))
 
         return TaskResponse(
             id=task.id,
-            title=t_hash,
+            title=plain_title,
             title_hash=t_hash,
             completed=task.completed,
             completed_hash=c_hash,
             priority=task.priority,
             priority_hash=p_hash,
-            description=d_hash,
+            description=plain_desc,
             description_hash=d_hash,
             due_date=task.due_date,
             created_at=task.created_at,
@@ -45,6 +43,8 @@ class TaskService:
         task_id = uuid.uuid4()
         now = datetime.now(timezone.utc)
         
+        enc_title = encrypt_text(task_in.title)
+        enc_desc = encrypt_text(task_in.description)
         t_hash = compute_hash(task_in.title)
         d_hash = compute_hash(task_in.description)
         p_hash = compute_hash(str(task_in.priority))
@@ -53,11 +53,13 @@ class TaskService:
         new_task = TaskModel(
             id=task_id,
             owner_id=owner_id,
+            encrypted_title=enc_title,
             title_hash=t_hash,
             completed=False,
             completed_hash=c_hash,
             priority=task_in.priority,
             priority_hash=p_hash,
+            encrypted_description=enc_desc,
             description_hash=d_hash,
             due_date=task_in.due_date,
             created_at=now,
@@ -168,16 +170,20 @@ class TaskService:
                 detail="You do not have permission to modify this task"
             )
             
+        enc_title = encrypt_text(task_in.title)
+        enc_desc = encrypt_text(task_in.description)
         t_hash = compute_hash(task_in.title)
         d_hash = compute_hash(task_in.description)
         p_hash = compute_hash(str(task_in.priority))
         c_hash = compute_hash(str(task_in.completed))
 
+        task.encrypted_title = enc_title
         task.title_hash = t_hash
         task.priority = task_in.priority
         task.priority_hash = p_hash
         task.completed = task_in.completed
         task.completed_hash = c_hash
+        task.encrypted_description = enc_desc
         task.description_hash = d_hash
         task.due_date = task_in.due_date
         task.updated_at = datetime.now(timezone.utc)

@@ -12,6 +12,7 @@ from app.models.chat import ChatRequestModel, ChatMessageModel
 from app.models.global_chat import GlobalChatMessageModel
 from app.core.connection_manager import connection_manager
 from app.schemas.chat import MessageCreate, MessageResponse, ChatUser, ChatRequestResponse
+from app.utils.encryption import encrypt_text, decrypt_text, compute_hash
 
 class ChatService:
     @staticmethod
@@ -43,7 +44,8 @@ class ChatService:
     ) -> MessageResponse:
         message_id = uuid.uuid4()
         created_at = datetime.now(timezone.utc)
-        content_hash = hashlib.sha256(data.content.encode("utf-8")).hexdigest()
+        enc_content = encrypt_text(data.content)
+        content_hash = compute_hash(data.content)
 
         # Fetch sender details from main DB
         sender_stmt = select(UserModel).where(UserModel.id == sender_id)
@@ -57,6 +59,7 @@ class ChatService:
                 id=message_id,
                 sender_id=sender_id,
                 recipient_id="global",
+                encrypted_content=enc_content,
                 content_hash=content_hash,
                 is_edited=False,
                 created_at=created_at,
@@ -70,6 +73,7 @@ class ChatService:
                 id=message_id,
                 sender_id=sender_id,
                 recipient_id=data.recipient_id,
+                encrypted_content=enc_content,
                 content_hash=content_hash,
                 is_edited=False,
                 created_at=created_at,
@@ -85,7 +89,7 @@ class ChatService:
             sender_name=sender_name,
             sender_avatar=sender_avatar,
             recipient_id=data.recipient_id,
-            content=content_hash,
+            content=data.content,
             content_hash=content_hash,
             created_at=created_at,
             is_edited=False,
@@ -108,6 +112,7 @@ class ChatService:
             for msg in gc_docs:
                 s_name = msg.sender.username if msg.sender else "Unknown"
                 s_avatar = msg.sender.avatar_url if msg.sender else None
+                plain_content = decrypt_text(msg.encrypted_content) or ""
 
                 results.append(
                     MessageResponse(
@@ -116,7 +121,7 @@ class ChatService:
                         sender_name=s_name,
                         sender_avatar=s_avatar,
                         recipient_id="global",
-                        content=msg.content_hash,
+                        content=plain_content,
                         content_hash=msg.content_hash,
                         created_at=msg.created_at,
                         is_edited=msg.is_edited,
@@ -155,6 +160,7 @@ class ChatService:
         for msg in docs:
             s_name = msg.sender.username if msg.sender else "Unknown"
             s_avatar = msg.sender.avatar_url if msg.sender else None
+            plain_content = decrypt_text(msg.encrypted_content) or ""
 
             results.append(
                 MessageResponse(
@@ -163,7 +169,7 @@ class ChatService:
                     sender_name=s_name,
                     sender_avatar=s_avatar,
                     recipient_id=msg.recipient_id,
-                    content=msg.content_hash,
+                    content=plain_content,
                     content_hash=msg.content_hash,
                     created_at=msg.created_at,
                     is_edited=msg.is_edited,
@@ -189,8 +195,10 @@ class ChatService:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot edit someone else's message")
 
             updated_at = datetime.now(timezone.utc)
-            c_hash = hashlib.sha256(new_content.encode("utf-8")).hexdigest()
+            enc_content = encrypt_text(new_content)
+            c_hash = compute_hash(new_content)
 
+            gc_msg.encrypted_content = enc_content
             gc_msg.content_hash = c_hash
             gc_msg.is_edited = True
             gc_msg.updated_at = updated_at
@@ -207,8 +215,8 @@ class ChatService:
                 sender_name=s_name,
                 sender_avatar=s_avatar,
                 recipient_id="global",
-                content=gc_msg.content_hash,
-                content_hash=gc_msg.content_hash,
+                content=new_content,
+                content_hash=c_hash,
                 created_at=gc_msg.created_at,
                 is_edited=gc_msg.is_edited,
                 updated_at=gc_msg.updated_at
@@ -226,8 +234,10 @@ class ChatService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot edit someone else's message")
 
         updated_at = datetime.now(timezone.utc)
-        c_hash = hashlib.sha256(new_content.encode("utf-8")).hexdigest()
+        enc_content = encrypt_text(new_content)
+        c_hash = compute_hash(new_content)
         
+        msg.encrypted_content = enc_content
         msg.content_hash = c_hash
         msg.is_edited = True
         msg.updated_at = updated_at
@@ -244,8 +254,8 @@ class ChatService:
             sender_name=s_name,
             sender_avatar=s_avatar,
             recipient_id=msg.recipient_id,
-            content=msg.content_hash,
-            content_hash=msg.content_hash,
+            content=new_content,
+            content_hash=c_hash,
             created_at=msg.created_at,
             is_edited=msg.is_edited,
             updated_at=msg.updated_at
