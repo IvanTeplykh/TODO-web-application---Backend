@@ -40,3 +40,4 @@ class TaskModel(Base):
     collaborators = relationship("TaskCollaboratorModel", back_populates="task", cascade="all, delete-orphan")
     share_requests = relationship("TaskShareRequestModel", back_populates="task", cascade="all, delete-orphan")
     history = relationship("TaskHistoryModel", back_populates="task", cascade="all, delete-orphan")
+    comments = relationship("TaskCommentModel", back_populates="task", cascade="all, delete-orphan")

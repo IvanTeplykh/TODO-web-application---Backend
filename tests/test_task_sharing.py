@@ -172,3 +172,84 @@ async def test_task_transfer_ownership_flow(async_client: AsyncClient, authentic
     # 6. User 3 can delete task
     del_res = await async_client.delete(f"/api/v1/tasks/{task_id}", headers=headers3)
     assert del_res.status_code == 204
+
+@pytest.mark.asyncio
+async def test_task_comments_flow(async_client: AsyncClient, authenticated_user: dict):
+    headers1 = authenticated_user["headers"]
+
+    # 1. Register User 4
+    u4_payload = {
+        "username": "TaskCommentMemberFour",
+        "email": "taskmember4@example.com",
+        "password": "Password123!"
+    }
+    reg4 = await async_client.post("/api/v1/auth/register", json=u4_payload)
+    assert reg4.status_code == 201
+    login4 = await async_client.post("/api/v1/auth/login", json={
+        "email": u4_payload["email"],
+        "password": u4_payload["password"]
+    })
+    headers4 = {"Authorization": f"Bearer {login4.json()['access_token']}"}
+
+    # 2. Create Task as User 1
+    create_res = await async_client.post(
+        "/api/v1/tasks",
+        json={"title": "Task with Comments", "priority": 5},
+        headers=headers1
+    )
+    task_id = create_res.json()["id"]
+
+    # 3. Share task with User 4
+    share_res = await async_client.post(
+        f"/api/v1/tasks/{task_id}/share",
+        json={"target_username": "TaskCommentMemberFour", "access_level": "status_only"},
+        headers=headers1
+    )
+    req_id = share_res.json()["id"]
+    passcode = share_res.json()["passcode"]
+
+    # User 4 accepts
+    await async_client.post(
+        f"/api/v1/tasks/shares/{req_id}/respond",
+        json={"passcode": passcode, "action": "accept"},
+        headers=headers4
+    )
+
+    # 4. Owner (User 1) posts a comment
+    c1_res = await async_client.post(
+        f"/api/v1/tasks/{task_id}/comments",
+        json={"content": "Welcome to the task discussion!"},
+        headers=headers1
+    )
+    assert c1_res.status_code == 201
+    c1 = c1_res.json()
+    assert c1["author_name"] == authenticated_user["user"]["username"]
+
+    # 5. Member (User 4) posts a comment
+    c2_res = await async_client.post(
+        f"/api/v1/tasks/{task_id}/comments",
+        json={"content": "Thanks! I'll update status as soon as I test it."},
+        headers=headers4
+    )
+    assert c2_res.status_code == 201
+    c2 = c2_res.json()
+    assert c2["author_name"] == "TaskCommentMemberFour"
+
+    # 6. Fetch comments
+    list_comments = await async_client.get(f"/api/v1/tasks/{task_id}/comments", headers=headers4)
+    assert list_comments.status_code == 200
+    comments = list_comments.json()
+    assert len(comments) == 2
+
+    # 7. Member updates their own comment
+    up_res = await async_client.put(
+        f"/api/v1/tasks/{task_id}/comments/{c2['id']}",
+        json={"content": "Updated comment text!"},
+        headers=headers4
+    )
+    assert up_res.status_code == 200
+    assert up_res.json()["content"] == "Updated comment text!"
+
+    # 8. Owner deletes member's comment (owner moderation)
+    del_res = await async_client.delete(f"/api/v1/tasks/{task_id}/comments/{c2['id']}", headers=headers1)
+    assert del_res.status_code == 204

@@ -11,7 +11,10 @@ from app.schemas.task import (
     TaskShareCreate,
     TaskShareResponse,
     TaskShareRespond,
-    TaskHistoryResponse
+    TaskHistoryResponse,
+    TaskCommentCreate,
+    TaskCommentUpdate,
+    TaskCommentResponse
 )
 from app.schemas.user import UserResponse
 from app.services.task_service import TaskService
@@ -131,3 +134,39 @@ async def remove_collaborator(
     session: AsyncSession = Depends(get_db)
 ):
     return await TaskService.remove_collaborator(session, task_id, current_user.id, target_user_id)
+
+@router.get("/{task_id}/comments", response_model=List[TaskCommentResponse])
+async def get_task_comments(
+    task_id: UUID,
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    return await TaskService.get_task_comments(session, task_id, current_user.id)
+
+@router.post("/{task_id}/comments", response_model=TaskCommentResponse, status_code=status.HTTP_201_CREATED)
+async def create_task_comment(
+    task_id: UUID,
+    payload: TaskCommentCreate,
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    return await TaskService.create_task_comment(session, task_id, current_user.id, payload)
+
+@router.put("/{task_id}/comments/{comment_id}", response_model=TaskCommentResponse)
+async def update_task_comment(
+    task_id: UUID,
+    comment_id: UUID,
+    payload: TaskCommentUpdate,
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    return await TaskService.update_task_comment(session, task_id, comment_id, current_user.id, payload)
+
+@router.delete("/{task_id}/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_task_comment(
+    task_id: UUID,
+    comment_id: UUID,
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    await TaskService.delete_task_comment(session, task_id, comment_id, current_user.id)

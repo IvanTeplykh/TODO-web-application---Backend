@@ -10,7 +10,7 @@ from sqlalchemy import select, func, desc, asc, and_, or_
 from sqlalchemy.orm import selectinload
 
 from app.models.task import TaskModel
-from app.models.task_collaborator import TaskCollaboratorModel, TaskShareRequestModel, TaskHistoryModel
+from app.models.task_collaborator import TaskCollaboratorModel, TaskShareRequestModel, TaskHistoryModel, TaskCommentModel
 from app.models.user import UserModel
 from app.schemas.task import (
     TaskCreate,
@@ -20,7 +20,10 @@ from app.schemas.task import (
     TaskCollaboratorResponse,
     TaskShareCreate,
     TaskShareResponse,
-    TaskHistoryResponse
+    TaskHistoryResponse,
+    TaskCommentCreate,
+    TaskCommentUpdate,
+    TaskCommentResponse
 )
 from app.utils.pagination import PaginatedResponse
 from app.utils.encryption import encrypt_text, decrypt_text, compute_hash
@@ -603,3 +606,140 @@ class TaskService:
         await TaskService.record_history(session, task_id, owner_id, "collaborator_removed", f"Removed collaborator @{target_name}")
         await session.commit()
         return {"message": f"Collaborator @{target_name} removed"}
+
+    @staticmethod
+    async def get_task_comments(session: AsyncSession, task_id: UUID, user_id: UUID) -> List[TaskCommentResponse]:
+        await TaskService.get_task_by_id(session, task_id, user_id)
+
+        stmt = (
+            select(TaskCommentModel)
+            .options(selectinload(TaskCommentModel.author))
+            .where(TaskCommentModel.task_id == task_id)
+            .order_by(TaskCommentModel.created_at.asc())
+        )
+        res = await session.execute(stmt)
+        comments = res.scalars().all()
+
+        results = []
+        for c in comments:
+            results.append(
+                TaskCommentResponse(
+                    id=c.id,
+                    task_id=c.task_id,
+                    user_id=c.user_id,
+                    author_name=c.author.username if c.author else "Unknown",
+                    author_avatar_url=c.author.avatar_url if c.author else None,
+                    content=c.content,
+                    created_at=c.created_at,
+                    updated_at=c.updated_at
+                )
+            )
+        return results
+
+    @staticmethod
+    async def create_task_comment(
+        session: AsyncSession,
+        task_id: UUID,
+        user_id: UUID,
+        data: TaskCommentCreate
+    ) -> TaskCommentResponse:
+        await TaskService.get_task_by_id(session, task_id, user_id)
+
+        u_stmt = select(UserModel).where(UserModel.id == user_id)
+        u_res = await session.execute(u_stmt)
+        user = u_res.scalar_one_or_none()
+
+        comment_id = uuid.uuid4()
+        now = datetime.now(timezone.utc)
+        comment = TaskCommentModel(
+            id=comment_id,
+            task_id=task_id,
+            user_id=user_id,
+            content=data.content.strip(),
+            created_at=now,
+            updated_at=now
+        )
+        session.add(comment)
+
+        preview = data.content.strip()[:30] + ("..." if len(data.content.strip()) > 30 else "")
+        await TaskService.record_history(session, task_id, user_id, "comment_added", f"Comment added: '{preview}'")
+
+        await session.commit()
+        await session.refresh(comment)
+
+        return TaskCommentResponse(
+            id=comment.id,
+            task_id=comment.task_id,
+            user_id=comment.user_id,
+            author_name=user.username if user else "Unknown",
+            author_avatar_url=user.avatar_url if user else None,
+            content=comment.content,
+            created_at=comment.created_at,
+            updated_at=comment.updated_at
+        )
+
+    @staticmethod
+    async def update_task_comment(
+        session: AsyncSession,
+        task_id: UUID,
+        comment_id: UUID,
+        user_id: UUID,
+        data: TaskCommentUpdate
+    ) -> TaskCommentResponse:
+        stmt = (
+            select(TaskCommentModel)
+            .options(selectinload(TaskCommentModel.author))
+            .where(and_(TaskCommentModel.id == comment_id, TaskCommentModel.task_id == task_id))
+        )
+        res = await session.execute(stmt)
+        comment = res.scalar_one_or_none()
+
+        if not comment:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+
+        if comment.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only edit your own comments")
+
+        comment.content = data.content.strip()
+        comment.updated_at = datetime.now(timezone.utc)
+
+        await session.commit()
+        await session.refresh(comment)
+
+        return TaskCommentResponse(
+            id=comment.id,
+            task_id=comment.task_id,
+            user_id=comment.user_id,
+            author_name=comment.author.username if comment.author else "Unknown",
+            author_avatar_url=comment.author.avatar_url if comment.author else None,
+            content=comment.content,
+            created_at=comment.created_at,
+            updated_at=comment.updated_at
+        )
+
+    @staticmethod
+    async def delete_task_comment(
+        session: AsyncSession,
+        task_id: UUID,
+        comment_id: UUID,
+        user_id: UUID
+    ) -> None:
+        task_stmt = select(TaskModel).where(TaskModel.id == task_id)
+        task_res = await session.execute(task_stmt)
+        task = task_res.scalar_one_or_none()
+
+        if not task:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+        stmt = select(TaskCommentModel).where(and_(TaskCommentModel.id == comment_id, TaskCommentModel.task_id == task_id))
+        res = await session.execute(stmt)
+        comment = res.scalar_one_or_none()
+
+        if not comment:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+
+        if comment.user_id != user_id and task.owner_id != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to delete this comment")
+
+        await session.delete(comment)
+        await session.commit()

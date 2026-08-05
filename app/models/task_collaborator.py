@@ -95,3 +95,35 @@ class TaskHistoryModel(Base):
 
     task = relationship("TaskModel", back_populates="history")
     actor = relationship("UserModel", foreign_keys=[actor_id])
+
+class TaskCommentModel(Base):
+    __tablename__ = "task_comments"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        GUID,
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        GUID,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    task = relationship("TaskModel", back_populates="comments")
+    author = relationship("UserModel", foreign_keys=[user_id])

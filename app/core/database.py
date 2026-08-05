@@ -84,6 +84,16 @@ class Database:
                     details TEXT,
                     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS task_comments (
+                    id UUID PRIMARY KEY,
+                    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 """
             ]
             for sql_stmt in table_sqls:
