@@ -50,8 +50,46 @@ class Database:
         if self.engine:
             async with self.engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+
+            table_sqls = [
+                "ALTER TABLE users ADD COLUMN chat_retention_days INTEGER DEFAULT 180;",
+                """
+                CREATE TABLE IF NOT EXISTS task_collaborators (
+                    id UUID PRIMARY KEY,
+                    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    access_level VARCHAR(20) NOT NULL DEFAULT 'status_only',
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_task_collaborator UNIQUE (task_id, user_id)
+                );
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS task_share_requests (
+                    id UUID PRIMARY KEY,
+                    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    target_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    access_level VARCHAR(20) NOT NULL,
+                    passcode VARCHAR(10) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS task_history (
+                    id UUID PRIMARY KEY,
+                    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                    actor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    action VARCHAR(50) NOT NULL,
+                    details TEXT,
+                    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            ]
+            for sql_stmt in table_sqls:
                 try:
-                    await conn.execute(text("ALTER TABLE users ADD COLUMN chat_retention_days INTEGER DEFAULT 180;"))
+                    async with self.engine.begin() as conn:
+                        await conn.execute(text(sql_stmt))
                 except Exception:
                     pass
 
