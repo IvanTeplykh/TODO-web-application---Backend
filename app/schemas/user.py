@@ -1,6 +1,6 @@
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 
 class UserCreate(BaseModel):
     username: str
@@ -14,8 +14,7 @@ class UserResponse(BaseModel):
     avatar_url: str | None = None
     chat_retention_days: int = 180
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class UserUpdate(BaseModel):
     username: str

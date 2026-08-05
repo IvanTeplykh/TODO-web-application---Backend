@@ -1,6 +1,6 @@
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=100)
@@ -35,5 +35,4 @@ class TaskResponse(BaseModel):
     updated_at: datetime
     owner_id: UUID
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

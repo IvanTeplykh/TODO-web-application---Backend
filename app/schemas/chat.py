@@ -6,7 +6,6 @@ from uuid import UUID
 class ChatUser(BaseModel):
     id: UUID
     username: str
-    email: str
     avatar_url: Optional[str] = None
     is_online: bool = False
     connection_status: Optional[str] = Field("none", description="accepted, pending_sent, pending_received, none")

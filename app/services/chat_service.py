@@ -372,7 +372,6 @@ class ChatService:
                 ChatUser(
                     id=u.id,
                     username=u.username,
-                    email=u.email,
                     avatar_url=u.avatar_url,
                     is_online=connection_manager.is_user_online(str(u.id)),
                     connection_status=status_map.get(u.id, "none")
