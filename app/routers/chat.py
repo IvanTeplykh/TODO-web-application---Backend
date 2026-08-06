@@ -188,10 +188,8 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
-    user_id_str = str(current_user.id)
-    if user_id_str not in connection_manager.active_connections:
-        connection_manager.active_connections[user_id_str] = []
-    connection_manager.active_connections[user_id_str].append(websocket)
+    user_id_str = str(current_user.id).lower()
+    connection_manager.connect(user_id_str, websocket)
 
     # Notify connected users that someone came online
     await connection_manager.broadcast({
