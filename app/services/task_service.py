@@ -202,6 +202,22 @@ class TaskService:
         elif status_filter == "overdue":
             conditions.append(TaskModel.completed.is_(False))
             conditions.append(and_(TaskModel.due_date.isnot(None), TaskModel.due_date < now))
+        elif status_filter == "collaborator":
+            collab_subq = select(TaskCollaboratorModel.task_id).where(
+                and_(
+                    TaskCollaboratorModel.user_id == owner_id,
+                    TaskCollaboratorModel.access_level == "status_only"
+                )
+            )
+            conditions.append(TaskModel.id.in_(collab_subq))
+        elif status_filter == "co_owner":
+            co_subq = select(TaskCollaboratorModel.task_id).where(
+                and_(
+                    TaskCollaboratorModel.user_id == owner_id,
+                    TaskCollaboratorModel.access_level == "full_access"
+                )
+            )
+            conditions.append(TaskModel.id.in_(co_subq))
         
         if search:
             search_hash = compute_hash(search.strip())
