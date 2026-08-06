@@ -1,25 +1,25 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from typing import List
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.connection_manager import connection_manager
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
-from app.schemas.user import UserResponse
 from app.schemas.channel import (
-    ChannelCreate,
-    ChannelUpdate,
-    ChannelResponse,
-    ChannelMemberResponse,
-    ChannelInviteResponse,
     AddMemberRequest,
-    UpdateMemberRoleRequest,
+    ChannelCreate,
+    ChannelInviteResponse,
+    ChannelMemberResponse,
     ChannelMessageCreate,
+    ChannelMessageResponse,
     ChannelMessageUpdate,
-    ChannelMessageResponse
+    ChannelResponse,
+    ChannelUpdate,
+    UpdateMemberRoleRequest,
 )
+from app.schemas.user import UserResponse
 from app.services.channel_service import channel_service
-from app.core.connection_manager import connection_manager
 
 router = APIRouter(prefix="/channels", tags=["channels"])
 
@@ -31,14 +31,14 @@ async def create_channel(
 ):
     return await channel_service.create_channel(session, current_user.id, data)
 
-@router.get("", response_model=List[ChannelResponse])
+@router.get("", response_model=list[ChannelResponse])
 async def get_my_channels(
     current_user: UserResponse = Depends(get_current_user),
     session: AsyncSession = Depends(get_db)
 ):
     return await channel_service.get_user_channels(session, current_user.id)
 
-@router.get("/{channel_id}/members", response_model=List[ChannelMemberResponse])
+@router.get("/{channel_id}/members", response_model=list[ChannelMemberResponse])
 async def get_channel_members(
     channel_id: UUID,
     current_user: UserResponse = Depends(get_current_user),
@@ -74,7 +74,7 @@ async def delete_channel(
     })
     return res
 
-@router.get("/invites/pending", response_model=List[ChannelInviteResponse])
+@router.get("/invites/pending", response_model=list[ChannelInviteResponse])
 async def get_my_pending_channel_invites(
     current_user: UserResponse = Depends(get_current_user),
     session: AsyncSession = Depends(get_db)
@@ -149,7 +149,7 @@ async def update_member_role(
     })
     return res
 
-@router.get("/{channel_id}/messages", response_model=List[ChannelMessageResponse])
+@router.get("/{channel_id}/messages", response_model=list[ChannelMessageResponse])
 async def get_channel_messages(
     channel_id: UUID,
     limit: int = Query(100, ge=1, le=500),

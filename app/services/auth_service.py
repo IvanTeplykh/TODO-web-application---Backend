@@ -1,15 +1,17 @@
 import uuid
 from datetime import datetime, timedelta, timezone
+
 from fastapi import HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
-from app.core.security import get_password_hash, verify_password, create_access_token
+from app.core.security import create_access_token, get_password_hash, verify_password
 from app.models.user import UserModel
 from app.schemas.auth import LoginRequest, Token
 from app.schemas.user import UserCreate, UserRegisterResponse
+from app.utils.encryption import compute_hash, encrypt_text
 
-from app.utils.encryption import encrypt_text, compute_hash
 
 class AuthService:
     @staticmethod

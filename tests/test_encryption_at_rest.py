@@ -1,9 +1,14 @@
 import pytest
 from sqlalchemy import select
-from app.models.user import UserModel
+
 from app.models.channel import ChannelModel
-from app.models.task_collaborator import TaskCommentModel, TaskHistoryModel, TaskShareRequestModel
+from app.models.task_collaborator import (
+    TaskCommentModel,
+    TaskHistoryModel,
+)
+from app.models.user import UserModel
 from app.utils.encryption import decrypt_text
+
 
 @pytest.mark.asyncio
 async def test_user_email_and_avatar_encrypted_in_db(async_client, mock_database):

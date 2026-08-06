@@ -1,8 +1,10 @@
 import base64
 import hashlib
-from typing import Optional
+
 from cryptography.fernet import Fernet
+
 from app.core.config import settings
+
 
 def _get_fernet_key() -> bytes:
     key_bytes = hashlib.sha256(settings.SECRET_KEY.encode("utf-8")).digest()
@@ -10,12 +12,12 @@ def _get_fernet_key() -> bytes:
 
 fernet = Fernet(_get_fernet_key())
 
-def encrypt_text(plain_text: Optional[str]) -> Optional[str]:
+def encrypt_text(plain_text: str | None) -> str | None:
     if plain_text is None:
         return None
     return fernet.encrypt(plain_text.encode("utf-8")).decode("utf-8")
 
-def decrypt_text(cipher_text: Optional[str]) -> Optional[str]:
+def decrypt_text(cipher_text: str | None) -> str | None:
     if cipher_text is None:
         return None
     try:
@@ -23,7 +25,7 @@ def decrypt_text(cipher_text: Optional[str]) -> Optional[str]:
     except Exception:
         return cipher_text
 
-def compute_hash(text: Optional[str]) -> Optional[str]:
+def compute_hash(text: str | None) -> str | None:
     if text is None:
         return None
     return hashlib.sha256(text.encode("utf-8")).hexdigest()

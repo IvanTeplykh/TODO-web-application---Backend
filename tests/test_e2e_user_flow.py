@@ -1,5 +1,6 @@
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_complete_e2e_user_journey(async_client):
     user_email = "alex.dev@example.com"

@@ -1,7 +1,9 @@
 import pytest
 from httpx import AsyncClient
-from app.services.chat_service import chat_service
+
 from app.schemas.chat import MessageCreate
+from app.services.chat_service import chat_service
+
 
 @pytest.mark.asyncio
 async def test_chat_users_list(async_client: AsyncClient, authenticated_user: dict):
@@ -96,11 +98,12 @@ async def test_edit_and_delete_message(async_client: AsyncClient, authenticated_
 @pytest.mark.asyncio
 async def test_global_chat_retention_auto_deletion(async_client: AsyncClient, authenticated_user: dict):
     headers = authenticated_user["headers"]
+    from datetime import datetime, timedelta, timezone
     from uuid import UUID
-    from datetime import datetime, timezone, timedelta
+
     from app.core.database import db
     from app.models.global_chat import GlobalChatMessageModel
-    from app.utils.encryption import encrypt_text, compute_hash
+    from app.utils.encryption import compute_hash, encrypt_text
 
     user_id = UUID(authenticated_user["user"]["id"])
     old_date = datetime.now(timezone.utc) - timedelta(days=200)

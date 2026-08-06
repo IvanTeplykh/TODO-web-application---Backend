@@ -1,27 +1,28 @@
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, HTTPException, status
-from typing import List, Optional
 from uuid import UUID
-from jose import jwt, JWTError
-from sqlalchemy.ext.asyncio import AsyncSession
+
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, status
+from jose import JWTError, jwt
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
-from app.core.database import db, get_db
-from app.models.user import UserModel
-from app.models.channel import ChannelModel
 from app.core.connection_manager import connection_manager
+from app.core.database import db, get_db
 from app.dependencies.auth import get_current_user
+from app.models.channel import ChannelModel
+from app.models.user import UserModel
 from app.schemas.chat import (
-    MessageCreate,
-    MessageUpdate,
-    MessageResponse,
-    ChatUser,
-    ChatRequestCreate,
     ChatRequestAction,
-    ChatRequestResponse
+    ChatRequestCreate,
+    ChatRequestResponse,
+    ChatUser,
+    MessageCreate,
+    MessageResponse,
+    MessageUpdate,
 )
 from app.schemas.user import UserResponse
-from app.services.chat_service import chat_service
 from app.services.channel_service import channel_service
+from app.services.chat_service import chat_service
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -55,14 +56,14 @@ async def get_user_from_token_string(session: AsyncSession, token: str) -> UserR
         avatar_url=user.avatar_url
     )
 
-@router.get("/users", response_model=List[ChatUser])
+@router.get("/users", response_model=list[ChatUser])
 async def get_chat_users(
     current_user: UserResponse = Depends(get_current_user),
     session: AsyncSession = Depends(get_db)
 ):
     return await chat_service.get_chat_users(session, current_user.id)
 
-@router.get("/messages", response_model=List[MessageResponse])
+@router.get("/messages", response_model=list[MessageResponse])
 async def get_chat_messages(
     recipient_id: str = Query("global", description="Recipient UUID or 'global'"),
     limit: int = Query(100, ge=1, le=500),
@@ -181,7 +182,7 @@ async def send_chat_request(
     
     return res
 
-@router.get("/requests", response_model=List[ChatRequestResponse])
+@router.get("/requests", response_model=list[ChatRequestResponse])
 async def get_chat_requests(
     current_user: UserResponse = Depends(get_current_user),
     session: AsyncSession = Depends(get_db)
@@ -207,9 +208,8 @@ async def respond_chat_request(
     return res
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(None)):
-    await websocket.accept()
-
+async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(None)):
+    # 1. Validate token before accepting connection to avoid unauthenticated connections
     if not token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -220,9 +220,11 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
         try:
             current_user = await get_user_from_token_string(session, clean_token)
         except HTTPException:
-            await websocket.send_json({"type": "error", "detail": "Invalid authentication token"})
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
+
+    # 2. Accept connection only after successful auth
+    await websocket.accept()
 
     user_id_str = str(current_user.id).lower()
     connection_manager.connect(user_id_str, websocket)
@@ -247,6 +249,7 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
         while True:
             data = await websocket.receive_json()
             
+            # Handle client ping messages on the server
             if data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
                 continue
@@ -321,8 +324,9 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
                 if recipient_id != user_id_str:
                     await connection_manager.send_personal_message(msg_payload, user_id_str)
 
-    except Exception:
-        pass
+    except Exception as e:
+        # Log receive loop error instead of silent failure
+        print(f"[WS ERROR] Connection error for user {user_id_str}: {e}")
     finally:
         connection_manager.disconnect(user_id_str, websocket)
         if not connection_manager.is_user_online(user_id_str):

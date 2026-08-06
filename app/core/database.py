@@ -1,15 +1,11 @@
-from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from app.core.config import settings
-from app.models.base import Base
-import app.models.user
-import app.models.task
-import app.models.chat
-import app.models.global_chat
-import app.models.channel
-import app.models.task_collaborator
+from collections.abc import AsyncGenerator
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.core.config import settings
+from app.models.base import Base
+
 
 class Database:
     def __init__(self):

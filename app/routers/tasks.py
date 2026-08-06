@@ -1,24 +1,25 @@
-from fastapi import APIRouter, Depends, Query, status
 from uuid import UUID
-from typing import List
+
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
+from app.dependencies.auth import get_current_user
 from app.schemas.task import (
+    TaskCommentCreate,
+    TaskCommentResponse,
+    TaskCommentUpdate,
     TaskCreate,
-    TaskUpdate,
-    TaskStatusUpdate,
+    TaskHistoryResponse,
     TaskResponse,
     TaskShareCreate,
-    TaskShareResponse,
     TaskShareRespond,
-    TaskHistoryResponse,
-    TaskCommentCreate,
-    TaskCommentUpdate,
-    TaskCommentResponse
+    TaskShareResponse,
+    TaskStatusUpdate,
+    TaskUpdate,
 )
 from app.schemas.user import UserResponse
 from app.services.task_service import TaskService
-from app.dependencies.auth import get_current_user
 from app.utils.pagination import PaginatedResponse
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -53,7 +54,7 @@ async def get_tasks(
         order=order
     )
 
-@router.get("/shares/pending", response_model=List[TaskShareResponse])
+@router.get("/shares/pending", response_model=list[TaskShareResponse])
 async def get_pending_task_shares(
     current_user: UserResponse = Depends(get_current_user),
     session: AsyncSession = Depends(get_db)
@@ -118,7 +119,7 @@ async def share_task(
 ):
     return await TaskService.create_share_request(session, task_id, current_user.id, payload)
 
-@router.get("/{task_id}/history", response_model=List[TaskHistoryResponse])
+@router.get("/{task_id}/history", response_model=list[TaskHistoryResponse])
 async def get_task_history(
     task_id: UUID,
     current_user: UserResponse = Depends(get_current_user),
@@ -135,7 +136,7 @@ async def remove_collaborator(
 ):
     return await TaskService.remove_collaborator(session, task_id, current_user.id, target_user_id)
 
-@router.get("/{task_id}/comments", response_model=List[TaskCommentResponse])
+@router.get("/{task_id}/comments", response_model=list[TaskCommentResponse])
 async def get_task_comments(
     task_id: UUID,
     current_user: UserResponse = Depends(get_current_user),

@@ -1,21 +1,26 @@
-from fastapi import APIRouter, Depends, status, HTTPException, Query
-from typing import List
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
-from app.schemas.user import UserResponse, UserUpdate, ChangePasswordRequest, VerifyPasswordRequest, DeleteAccountRequest
-from app.dependencies.auth import get_current_user
-from app.core.database import get_db
-from app.models.user import UserModel
-from app.models.task import TaskModel
-from app.core.security import verify_password, get_password_hash
-from app.core.connection_manager import connection_manager
-from app.services.task_service import TaskService
 
-from app.utils.encryption import encrypt_text, decrypt_text
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.connection_manager import connection_manager
+from app.core.database import get_db
+from app.core.security import get_password_hash, verify_password
+from app.dependencies.auth import get_current_user
+from app.models.user import UserModel
+from app.schemas.user import (
+    ChangePasswordRequest,
+    DeleteAccountRequest,
+    UserResponse,
+    UserUpdate,
+    VerifyPasswordRequest,
+)
+from app.services.task_service import TaskService
+from app.utils.encryption import decrypt_text, encrypt_text
 
 router = APIRouter(prefix="/users", tags=["users"])
 
-@router.get("/search", response_model=List[UserResponse])
+@router.get("/search", response_model=list[UserResponse])
 async def search_users(
     q: str = Query("", min_length=0),
     current_user: UserResponse = Depends(get_current_user),

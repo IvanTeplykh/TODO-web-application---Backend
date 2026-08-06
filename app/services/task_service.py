@@ -1,33 +1,40 @@
-import uuid
 import math
 import random
+import uuid
 from datetime import datetime, timezone
 from uuid import UUID
-from typing import Optional, List
+
 from fastapi import HTTPException, status
+from sqlalchemy import and_, asc, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, asc, and_, or_
 from sqlalchemy.orm import selectinload
 
+from app.core.connection_manager import connection_manager
 from app.models.task import TaskModel
-from app.models.task_collaborator import TaskCollaboratorModel, TaskShareRequestModel, TaskHistoryModel, TaskCommentModel, TaskReadStatusModel
+from app.models.task_collaborator import (
+    TaskCollaboratorModel,
+    TaskCommentModel,
+    TaskHistoryModel,
+    TaskReadStatusModel,
+    TaskShareRequestModel,
+)
 from app.models.user import UserModel
 from app.schemas.task import (
-    TaskCreate,
-    TaskUpdate,
-    TaskStatusUpdate,
-    TaskResponse,
     TaskCollaboratorResponse,
+    TaskCommentCreate,
+    TaskCommentResponse,
+    TaskCommentUpdate,
+    TaskCreate,
+    TaskHistoryResponse,
+    TaskResponse,
     TaskShareCreate,
     TaskShareResponse,
-    TaskHistoryResponse,
-    TaskCommentCreate,
-    TaskCommentUpdate,
-    TaskCommentResponse
+    TaskStatusUpdate,
+    TaskUpdate,
 )
+from app.utils.encryption import compute_hash, decrypt_text, encrypt_text
 from app.utils.pagination import PaginatedResponse
-from app.utils.encryption import encrypt_text, decrypt_text, compute_hash
-from app.core.connection_manager import connection_manager
+
 
 class TaskService:
     @staticmethod
@@ -36,7 +43,7 @@ class TaskService:
         task_id: UUID,
         actor_id: UUID,
         action: str,
-        details: Optional[str] = None
+        details: str | None = None
     ) -> None:
         history_entry = TaskHistoryModel(
             id=uuid.uuid4(),
@@ -444,7 +451,7 @@ class TaskService:
         )
 
     @staticmethod
-    async def get_pending_share_requests(session: AsyncSession, user_id: UUID) -> List[TaskShareResponse]:
+    async def get_pending_share_requests(session: AsyncSession, user_id: UUID) -> list[TaskShareResponse]:
         stmt = (
             select(TaskShareRequestModel)
             .options(
@@ -633,7 +640,7 @@ class TaskService:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid action")
 
     @staticmethod
-    async def get_task_history(session: AsyncSession, task_id: UUID, user_id: UUID) -> List[TaskHistoryResponse]:
+    async def get_task_history(session: AsyncSession, task_id: UUID, user_id: UUID) -> list[TaskHistoryResponse]:
         # Permission check
         await TaskService.get_task_by_id(session, task_id, user_id)
 
@@ -698,7 +705,7 @@ class TaskService:
         return {"message": f"Collaborator @{target_name} removed"}
 
     @staticmethod
-    async def get_task_comments(session: AsyncSession, task_id: UUID, user_id: UUID) -> List[TaskCommentResponse]:
+    async def get_task_comments(session: AsyncSession, task_id: UUID, user_id: UUID) -> list[TaskCommentResponse]:
         await TaskService.get_task_by_id(session, task_id, user_id)
 
         # Mark comments as read for user

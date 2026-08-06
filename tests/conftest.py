@@ -1,8 +1,10 @@
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
-from app.main import app
+from httpx import ASGITransport, AsyncClient
+
 from app.core.database import db
+from app.main import app
+
 
 @pytest.fixture(scope="session")
 def event_loop():

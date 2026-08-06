@@ -1,5 +1,6 @@
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_check_email_exists_and_not_exists(async_client):
     # Check email when non-existent
@@ -122,6 +123,7 @@ async def test_logout_authorized(async_client, authenticated_user):
 @pytest.mark.asyncio
 async def test_login_remember_me(async_client):
     from jose import jwt
+
     from app.core.config import settings
 
     reg_payload = {

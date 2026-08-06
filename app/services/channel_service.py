@@ -1,27 +1,28 @@
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
 from uuid import UUID
+
 from fastapi import HTTPException, status
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_, delete, func
 from sqlalchemy.orm import selectinload
 
-from app.models.channel import ChannelModel, ChannelMemberModel, ChannelMessageModel
+from app.models.channel import ChannelMemberModel, ChannelMessageModel, ChannelModel
 from app.models.user import UserModel
 from app.schemas.channel import (
     ChannelCreate,
-    ChannelUpdate,
-    ChannelResponse,
-    ChannelMemberResponse,
     ChannelInviteResponse,
-    ChannelMessageResponse
+    ChannelMemberResponse,
+    ChannelMessageResponse,
+    ChannelResponse,
+    ChannelUpdate,
 )
-from app.utils.encryption import encrypt_text, decrypt_text, compute_hash
+from app.utils.encryption import compute_hash, decrypt_text, encrypt_text
+
 
 class ChannelService:
     @staticmethod
-    async def get_member_role(session: AsyncSession, channel_id: UUID, user_id: UUID) -> Optional[str]:
+    async def get_member_role(session: AsyncSession, channel_id: UUID, user_id: UUID) -> str | None:
         stmt = select(ChannelMemberModel.role).where(
             and_(
                 ChannelMemberModel.channel_id == channel_id,
@@ -77,7 +78,7 @@ class ChannelService:
         )
 
     @staticmethod
-    async def get_user_channels(session: AsyncSession, user_id: UUID) -> List[ChannelResponse]:
+    async def get_user_channels(session: AsyncSession, user_id: UUID) -> list[ChannelResponse]:
         stmt = (
             select(ChannelModel, ChannelMemberModel.role)
             .join(ChannelMemberModel, ChannelMemberModel.channel_id == ChannelModel.id)
@@ -113,7 +114,7 @@ class ChannelService:
         return channels
 
     @staticmethod
-    async def get_channel_members(session: AsyncSession, channel_id: UUID, user_id: UUID) -> List[ChannelMemberResponse]:
+    async def get_channel_members(session: AsyncSession, channel_id: UUID, user_id: UUID) -> list[ChannelMemberResponse]:
         role = await ChannelService.get_member_role(session, channel_id, user_id)
         if not role:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not a member of this channel")
@@ -205,8 +206,8 @@ class ChannelService:
         session: AsyncSession,
         channel_id: UUID,
         actor_id: UUID,
-        target_user_id: Optional[UUID] = None,
-        target_username: Optional[str] = None
+        target_user_id: UUID | None = None,
+        target_username: str | None = None
     ) -> ChannelMemberResponse:
         is_admin = await ChannelService.is_admin_or_owner(session, channel_id, actor_id)
         if not is_admin:
@@ -258,7 +259,7 @@ class ChannelService:
         )
 
     @staticmethod
-    async def get_pending_invites(session: AsyncSession, user_id: UUID) -> List[ChannelInviteResponse]:
+    async def get_pending_invites(session: AsyncSession, user_id: UUID) -> list[ChannelInviteResponse]:
         stmt = (
             select(ChannelMemberModel)
             .options(selectinload(ChannelMemberModel.channel))
@@ -419,7 +420,7 @@ class ChannelService:
         )
 
     @staticmethod
-    async def get_channel_messages(session: AsyncSession, channel_id: UUID, user_id: UUID, limit: int = 100) -> List[ChannelMessageResponse]:
+    async def get_channel_messages(session: AsyncSession, channel_id: UUID, user_id: UUID, limit: int = 100) -> list[ChannelMessageResponse]:
         role = await ChannelService.get_member_role(session, channel_id, user_id)
         if not role:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Must be a channel member to view messages")

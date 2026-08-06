@@ -1,10 +1,13 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, DateTime, Integer
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from sqlalchemy import DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.types import TypeDecorator, CHAR
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import CHAR, TypeDecorator
+
 from app.models.base import Base
+
 
 class GUID(TypeDecorator):
     """Platform-independent GUID type. Uses PostgreSQL's UUID type, otherwise CHAR(36)."""

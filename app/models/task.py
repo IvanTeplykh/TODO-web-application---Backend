@@ -1,9 +1,12 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, Boolean, Integer, DateTime, ForeignKey
-from sqlalchemy.orm import Mapped, mapped_column, relationship, backref
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, backref, mapped_column, relationship
+
 from app.models.base import Base
 from app.models.user import GUID
+
 
 class TaskModel(Base):
     __tablename__ = "tasks"

@@ -1,6 +1,7 @@
 import pytest
 from httpx import AsyncClient
 
+
 @pytest.mark.asyncio
 async def test_channel_full_lifecycle(async_client: AsyncClient, authenticated_user: dict):
     headers1 = authenticated_user["headers"]

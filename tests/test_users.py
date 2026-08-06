@@ -1,7 +1,10 @@
-import pytest
 from uuid import UUID
-from app.services.chat_service import chat_service
+
+import pytest
+
 from app.schemas.chat import MessageCreate
+from app.services.chat_service import chat_service
+
 
 @pytest.mark.asyncio
 async def test_update_profile_info(async_client, authenticated_user):

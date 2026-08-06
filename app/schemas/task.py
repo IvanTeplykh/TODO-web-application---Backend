@@ -1,7 +1,9 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
-from typing import Optional, List, Literal
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
+
 
 class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=100)
@@ -23,7 +25,7 @@ class TaskCollaboratorResponse(BaseModel):
     id: UUID
     user_id: UUID
     username: str
-    avatar_url: Optional[str] = None
+    avatar_url: str | None = None
     access_level: str # status_only, full_access
     created_at: datetime
 
@@ -42,7 +44,7 @@ class TaskShareResponse(BaseModel):
     target_user_id: UUID
     target_username: str
     access_level: str # transfer, status_only, full_access
-    passcode: Optional[str] = None # Returned to owner when created
+    passcode: str | None = None # Returned to owner when created
     status: str # pending, accepted, declined
     created_at: datetime
 
@@ -58,7 +60,7 @@ class TaskHistoryResponse(BaseModel):
     actor_id: UUID
     actor_name: str
     action: str
-    details: Optional[str] = None
+    details: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -74,7 +76,7 @@ class TaskCommentResponse(BaseModel):
     task_id: UUID
     user_id: UUID
     author_name: str
-    author_avatar_url: Optional[str] = None
+    author_avatar_url: str | None = None
     content: str
     created_at: datetime
     updated_at: datetime
@@ -84,20 +86,20 @@ class TaskCommentResponse(BaseModel):
 class TaskResponse(BaseModel):
     id: UUID
     title: str
-    title_hash: Optional[str] = Field(None, description="SHA-256 integrity hash of task title")
+    title_hash: str | None = Field(None, description="SHA-256 integrity hash of task title")
     completed: bool
-    completed_hash: Optional[str] = Field(None, description="SHA-256 integrity hash of task completed status")
+    completed_hash: str | None = Field(None, description="SHA-256 integrity hash of task completed status")
     priority: int
-    priority_hash: Optional[str] = Field(None, description="SHA-256 integrity hash of task priority")
+    priority_hash: str | None = Field(None, description="SHA-256 integrity hash of task priority")
     description: str | None = None
-    description_hash: Optional[str] = Field(None, description="SHA-256 integrity hash of task description")
+    description_hash: str | None = Field(None, description="SHA-256 integrity hash of task description")
     due_date: datetime | None = None
     created_at: datetime
     updated_at: datetime
     owner_id: UUID
-    owner_username: Optional[str] = None
+    owner_username: str | None = None
     my_access_level: str = "owner" # owner, full_access, status_only
-    collaborators: List[TaskCollaboratorResponse] = []
+    collaborators: list[TaskCollaboratorResponse] = []
     has_unread_comments: bool = False
     unread_comments_count: int = 0
 

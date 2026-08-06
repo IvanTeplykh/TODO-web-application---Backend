@@ -1,10 +1,12 @@
-from typing import Dict, List
+
 from fastapi import WebSocket
+
 
 class ConnectionManager:
     def __init__(self):
-        # Maps user_id (str) to a set of active WebSockets
-        self.active_connections: Dict[str, List[WebSocket]] = {}
+        # Maps user_id (str) to a list of active WebSockets
+        # Note: A set[WebSocket] could also be used to automatically prevent duplicate socket instances
+        self.active_connections: dict[str, list[WebSocket]] = {}
 
     def _normalize_key(self, user_id: str | None) -> str:
         return str(user_id).lower().strip() if user_id else ""
@@ -34,15 +36,19 @@ class ConnectionManager:
             for connection in list(self.active_connections[key]):
                 try:
                     await connection.send_json(message)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Log error and remove dead connection
+                    print(f"[WS SEND ERROR] Failed to send message to user {user_id}: {e}")
+                    self.disconnect(user_id, connection)
 
     async def broadcast(self, message: dict):
         for user_id, connections in list(self.active_connections.items()):
             for connection in list(connections):
                 try:
                     await connection.send_json(message)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Log error and remove dead connection
+                    print(f"[WS BROADCAST ERROR] Failed to send message to user {user_id}: {e}")
+                    self.disconnect(user_id, connection)
 
 connection_manager = ConnectionManager()

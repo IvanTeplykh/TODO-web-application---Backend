@@ -1,18 +1,24 @@
 import uuid
-from datetime import datetime, timezone, timedelta
-from typing import List, Optional
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
+
 from fastapi import HTTPException, status
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_, delete
 from sqlalchemy.orm import selectinload
-from app.models.user import UserModel
-from app.models.chat import ChatRequestModel, ChatMessageModel
-from app.models.global_chat import GlobalChatMessageModel
-from app.models.channel import ChannelMemberModel
+
 from app.core.connection_manager import connection_manager
-from app.schemas.chat import MessageCreate, MessageResponse, ChatUser, ChatRequestResponse
-from app.utils.encryption import encrypt_text, decrypt_text, compute_hash
+from app.models.channel import ChannelMemberModel
+from app.models.chat import ChatMessageModel, ChatRequestModel
+from app.models.global_chat import GlobalChatMessageModel
+from app.models.user import UserModel
+from app.schemas.chat import (
+    ChatRequestResponse,
+    ChatUser,
+    MessageCreate,
+    MessageResponse,
+)
+from app.utils.encryption import compute_hash, decrypt_text, encrypt_text
 
 GLOBAL_CHAT_RETENTION_DAYS = 180
 
@@ -121,7 +127,7 @@ class ChatService:
         )
 
     @staticmethod
-    async def get_messages(session: AsyncSession, user_id: UUID, recipient_id: str, limit: int = 100) -> List[MessageResponse]:
+    async def get_messages(session: AsyncSession, user_id: UUID, recipient_id: str, limit: int = 100) -> list[MessageResponse]:
         if recipient_id == "global":
             # Auto-delete & filter messages older than 180 days
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=GLOBAL_CHAT_RETENTION_DAYS)
@@ -357,7 +363,7 @@ class ChatService:
         return deleted_info
 
     @staticmethod
-    async def get_chat_users(session: AsyncSession, current_user_id: UUID) -> List[ChatUser]:
+    async def get_chat_users(session: AsyncSession, current_user_id: UUID) -> list[ChatUser]:
         stmt = select(UserModel).where(UserModel.id != current_user_id)
         res = await session.execute(stmt)
         users = res.scalars().all()
@@ -510,7 +516,7 @@ class ChatService:
         )
 
     @staticmethod
-    async def get_chat_requests(session: AsyncSession, user_id: UUID) -> List[ChatRequestResponse]:
+    async def get_chat_requests(session: AsyncSession, user_id: UUID) -> list[ChatRequestResponse]:
         stmt = (
             select(ChatRequestModel)
             .options(
