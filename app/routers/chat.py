@@ -191,7 +191,14 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
     user_id_str = str(current_user.id).lower()
     connection_manager.connect(user_id_str, websocket)
 
-    # Notify connected users that someone came online
+    # 1. Send currently connected online users to the new client
+    online_ids = [uid for uid, conns in connection_manager.active_connections.items() if conns]
+    await websocket.send_json({
+        "type": "online_users",
+        "user_ids": online_ids
+    })
+
+    # 2. Notify connected users that someone came online
     await connection_manager.broadcast({
         "type": "user_status",
         "user_id": user_id_str,
