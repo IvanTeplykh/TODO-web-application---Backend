@@ -54,6 +54,7 @@ class Database:
             table_sqls = [
                 "ALTER TABLE users ADD COLUMN chat_retention_days INTEGER DEFAULT 180;",
                 "ALTER TABLE users ADD COLUMN email_hash VARCHAR(64);",
+                "ALTER TABLE task_share_requests ALTER COLUMN passcode TYPE VARCHAR(255);",
                 "CREATE INDEX IF NOT EXISTS ix_users_email_hash ON users (email_hash);",
                 """
                 CREATE TABLE IF NOT EXISTS task_collaborators (
@@ -72,7 +73,7 @@ class Database:
                     owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     target_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     access_level VARCHAR(20) NOT NULL,
-                    passcode VARCHAR(10) NOT NULL,
+                    passcode VARCHAR(255) NOT NULL,
                     status VARCHAR(20) NOT NULL DEFAULT 'pending',
                     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );

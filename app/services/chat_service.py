@@ -372,7 +372,7 @@ class ChatService:
                 ChatUser(
                     id=u.id,
                     username=u.username,
-                    avatar_url=u.avatar_url,
+                    avatar_url=decrypt_text(u.avatar_url) if u.avatar_url else None,
                     is_online=connection_manager.is_user_online(str(u.id)),
                     connection_status=status_map.get(u.id, "none")
                 )
@@ -424,10 +424,10 @@ class ChatService:
                     id=existing.id,
                     requester_id=requester_id,
                     requester_name=requester_user.username,
-                    requester_avatar=requester_user.avatar_url,
+                    requester_avatar=decrypt_text(requester_user.avatar_url) if (requester_user and requester_user.avatar_url) else None,
                     recipient_id=recipient_uuid,
                     recipient_name=recipient_user.username,
-                    recipient_avatar=recipient_user.avatar_url,
+                    recipient_avatar=decrypt_text(recipient_user.avatar_url) if (recipient_user and recipient_user.avatar_url) else None,
                     status="pending",
                     created_at=existing.created_at
                 )
@@ -447,10 +447,10 @@ class ChatService:
             id=new_req.id,
             requester_id=requester_id,
             requester_name=requester_user.username,
-            requester_avatar=requester_user.avatar_url,
+            requester_avatar=decrypt_text(requester_user.avatar_url) if (requester_user and requester_user.avatar_url) else None,
             recipient_id=recipient_uuid,
             recipient_name=recipient_user.username,
-            recipient_avatar=recipient_user.avatar_url,
+            recipient_avatar=decrypt_text(recipient_user.avatar_url) if (recipient_user and recipient_user.avatar_url) else None,
             status="pending",
             created_at=new_req.created_at
         )
@@ -480,9 +480,9 @@ class ChatService:
         await session.refresh(req_doc)
 
         req_name = req_doc.requester.username if req_doc.requester else "Unknown"
-        req_avatar = req_doc.requester.avatar_url if req_doc.requester else None
+        req_avatar = decrypt_text(req_doc.requester.avatar_url) if (req_doc.requester and req_doc.requester.avatar_url) else None
         rec_name = req_doc.recipient.username if req_doc.recipient else "Unknown"
-        rec_avatar = req_doc.recipient.avatar_url if req_doc.recipient else None
+        rec_avatar = decrypt_text(req_doc.recipient.avatar_url) if (req_doc.recipient and req_doc.recipient.avatar_url) else None
 
         return ChatRequestResponse(
             id=req_doc.id,
@@ -512,9 +512,9 @@ class ChatService:
         results = []
         for r in docs:
             req_name = r.requester.username if r.requester else "Unknown"
-            req_avatar = r.requester.avatar_url if r.requester else None
+            req_avatar = decrypt_text(r.requester.avatar_url) if (r.requester and r.requester.avatar_url) else None
             rec_name = r.recipient.username if r.recipient else "Unknown"
-            rec_avatar = r.recipient.avatar_url if r.recipient else None
+            rec_avatar = decrypt_text(r.recipient.avatar_url) if (r.recipient and r.recipient.avatar_url) else None
 
             results.append(
                 ChatRequestResponse(

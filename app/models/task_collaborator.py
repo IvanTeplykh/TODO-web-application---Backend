@@ -57,7 +57,7 @@ class TaskShareRequestModel(Base):
         nullable=False
     )
     access_level: Mapped[str] = mapped_column(String(20), nullable=False) # transfer, status_only, full_access
-    passcode: Mapped[str] = mapped_column(String(10), nullable=False)
+    passcode: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False) # pending, accepted, declined
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
