@@ -757,6 +757,24 @@ class TaskService:
         u_stmt = select(UserModel).where(UserModel.id == user_id)
         u_res = await session.execute(u_stmt)
         user = u_res.scalar_one_or_none()
+        author_name = user.username if user else "Unknown"
+        author_avatar = decrypt_text(user.avatar_url) if (user and user.avatar_url) else None
+
+        task_stmt = (
+            select(TaskModel)
+            .options(selectinload(TaskModel.collaborators))
+            .where(TaskModel.id == task_id)
+        )
+        task_res = await session.execute(task_stmt)
+        task_db = task_res.scalar_one_or_none()
+
+        target_ids = set()
+        if task_db:
+            if task_db.owner_id != user_id:
+                target_ids.add(str(task_db.owner_id))
+            for c in task_db.collaborators:
+                if c.user_id != user_id:
+                    target_ids.add(str(c.user_id))
 
         comment_id = uuid.uuid4()
         now = datetime.now(timezone.utc)
@@ -774,44 +792,26 @@ class TaskService:
         await TaskService.record_history(session, task_id, user_id, "comment_added", f"Comment added: '{preview}'")
 
         await session.commit()
-        await session.refresh(comment)
 
-        # Broadcast real-time comment notification to owner & collaborators
-        task_stmt = (
-            select(TaskModel)
-            .options(selectinload(TaskModel.collaborators))
-            .where(TaskModel.id == task_id)
-        )
-        task_res = await session.execute(task_stmt)
-        task_db = task_res.scalar_one_or_none()
-
-        if task_db:
-            target_ids = set()
-            if task_db.owner_id != user_id:
-                target_ids.add(str(task_db.owner_id))
-            for c in task_db.collaborators:
-                if c.user_id != user_id:
-                    target_ids.add(str(c.user_id))
-
-            for tid in target_ids:
-                await connection_manager.send_personal_message(
-                    {
-                        "type": "task_comment_added",
-                        "task_id": str(task_id),
-                        "author_name": user.username if user else "User"
-                    },
-                    tid
-                )
+        for tid in target_ids:
+            await connection_manager.send_personal_message(
+                {
+                    "type": "task_comment_added",
+                    "task_id": str(task_id),
+                    "author_name": author_name
+                },
+                tid
+            )
 
         return TaskCommentResponse(
-            id=comment.id,
-            task_id=comment.task_id,
-            user_id=comment.user_id,
-            author_name=user.username if user else "Unknown",
-            author_avatar_url=decrypt_text(user.avatar_url) if (user and user.avatar_url) else None,
+            id=comment_id,
+            task_id=task_id,
+            user_id=user_id,
+            author_name=author_name,
+            author_avatar_url=author_avatar,
             content=data.content.strip(),
-            created_at=comment.created_at,
-            updated_at=comment.updated_at
+            created_at=now,
+            updated_at=now
         )
 
     @staticmethod
@@ -836,21 +836,24 @@ class TaskService:
         if comment.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only edit your own comments")
 
+        author_name = comment.author.username if comment.author else "Unknown"
+        author_avatar = decrypt_text(comment.author.avatar_url) if (comment.author and comment.author.avatar_url) else None
+
+        updated_at = datetime.now(timezone.utc)
         comment.content = encrypt_text(data.content.strip())
-        comment.updated_at = datetime.now(timezone.utc)
+        comment.updated_at = updated_at
 
         await session.commit()
-        await session.refresh(comment)
 
         return TaskCommentResponse(
             id=comment.id,
             task_id=comment.task_id,
             user_id=comment.user_id,
-            author_name=comment.author.username if comment.author else "Unknown",
-            author_avatar_url=decrypt_text(comment.author.avatar_url) if (comment.author and comment.author.avatar_url) else None,
+            author_name=author_name,
+            author_avatar_url=author_avatar,
             content=data.content.strip(),
             created_at=comment.created_at,
-            updated_at=comment.updated_at
+            updated_at=updated_at
         )
 
     @staticmethod
