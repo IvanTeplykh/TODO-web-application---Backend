@@ -209,7 +209,9 @@ async def respond_chat_request(
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(None)):
-    # 1. Validate token before accepting connection to avoid unauthenticated connections
+    # 1. Accept WebSocket handshake first to establish WS protocol (prevents HTTP 500 on close)
+    await websocket.accept()
+
     if not token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -219,12 +221,14 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(Non
     async with db.session_factory() as session:
         try:
             current_user = await get_user_from_token_string(session, clean_token)
-        except HTTPException:
+        except Exception as e:
+            print(f"[WS AUTH ERROR] Invalid token: {e}")
+            try:
+                await websocket.send_json({"type": "error", "detail": "Invalid authentication token"})
+            except Exception:
+                pass
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
-
-    # 2. Accept connection only after successful auth
-    await websocket.accept()
 
     user_id_str = str(current_user.id).lower()
     connection_manager.connect(user_id_str, websocket)
