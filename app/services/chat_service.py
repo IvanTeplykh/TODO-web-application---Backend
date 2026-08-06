@@ -261,7 +261,7 @@ class ChatService:
             await session.refresh(gc_msg)
 
             s_name = gc_msg.sender.username if gc_msg.sender else "Unknown"
-            s_avatar = gc_msg.sender.avatar_url if gc_msg.sender else None
+            s_avatar = decrypt_text(gc_msg.sender.avatar_url) if (gc_msg.sender and gc_msg.sender.avatar_url) else None
 
             return MessageResponse(
                 id=gc_msg.id,
@@ -300,7 +300,7 @@ class ChatService:
         await session.refresh(msg)
 
         s_name = msg.sender.username if msg.sender else "Unknown"
-        s_avatar = msg.sender.avatar_url if msg.sender else None
+        s_avatar = decrypt_text(msg.sender.avatar_url) if (msg.sender and msg.sender.avatar_url) else None
 
         return MessageResponse(
             id=msg.id,
