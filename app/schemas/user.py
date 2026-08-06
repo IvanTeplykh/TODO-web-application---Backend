@@ -31,4 +31,7 @@ class ChangePasswordRequest(BaseModel):
 class VerifyPasswordRequest(BaseModel):
     password: str
 
+class DeleteAccountRequest(BaseModel):
+    password: str
+
 

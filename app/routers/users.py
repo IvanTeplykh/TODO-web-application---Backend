@@ -2,12 +2,14 @@ from fastapi import APIRouter, Depends, status, HTTPException, Query
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
-from app.schemas.user import UserResponse, UserUpdate, ChangePasswordRequest, VerifyPasswordRequest
+from app.schemas.user import UserResponse, UserUpdate, ChangePasswordRequest, VerifyPasswordRequest, DeleteAccountRequest
 from app.dependencies.auth import get_current_user
 from app.core.database import get_db
 from app.models.user import UserModel
+from app.models.task import TaskModel
 from app.core.security import verify_password, get_password_hash
 from app.core.connection_manager import connection_manager
+from app.services.task_service import TaskService
 
 from app.utils.encryption import encrypt_text, decrypt_text
 
@@ -127,3 +129,40 @@ async def verify_user_password(
         
     is_valid = verify_password(data.password, user_db.password)
     return {"valid": is_valid}
+
+@router.delete("/me")
+async def delete_account(
+    data: DeleteAccountRequest,
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    stmt = select(UserModel).where(UserModel.id == current_user.id)
+    res = await session.execute(stmt)
+    user_db = res.scalar_one_or_none()
+
+    if not user_db:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if not verify_password(data.password, user_db.password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect password"
+        )
+
+    # 1. Re-assign owned shared tasks to Co-Owners or Collaborators
+    await TaskService.reassign_tasks_before_user_deletion(session, current_user.id)
+    await session.commit()
+
+    # 2. Expunge all ORM instances to clear stale relationship backrefs
+    session.expunge_all()
+
+    # 3. Reload fresh user instance and delete
+    fresh_stmt = select(UserModel).where(UserModel.id == current_user.id)
+    fresh_res = await session.execute(fresh_stmt)
+    user_fresh = fresh_res.scalar_one_or_none()
+
+    if user_fresh:
+        await session.delete(user_fresh)
+        await session.commit()
+
+    return {"message": "Account deleted successfully"}

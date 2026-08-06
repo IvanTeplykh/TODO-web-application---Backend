@@ -873,4 +873,71 @@ class TaskService:
 
         await session.delete(comment)
         await session.commit()
+
+    @staticmethod
+    async def reassign_tasks_before_user_deletion(session: AsyncSession, user_id: UUID) -> None:
+        task_stmt = select(TaskModel).where(TaskModel.owner_id == user_id)
+        task_res = await session.execute(task_stmt)
+        owned_tasks = task_res.scalars().all()
+
+        u_stmt = select(UserModel.username).where(UserModel.id == user_id)
+        u_res = await session.execute(u_stmt)
+        old_owner_name = u_res.scalar_one_or_none() or "previous owner"
+
+        for task in owned_tasks:
+            collab_stmt = (
+                select(TaskCollaboratorModel)
+                .options(selectinload(TaskCollaboratorModel.user))
+                .where(
+                    and_(
+                        TaskCollaboratorModel.task_id == task.id,
+                        TaskCollaboratorModel.user_id != user_id
+                    )
+                )
+                .order_by(TaskCollaboratorModel.created_at.asc())
+            )
+            collab_res = await session.execute(collab_stmt)
+            collaborators = collab_res.scalars().all()
+
+            if not collaborators:
+                continue
+
+            # 1. Search for first Co-Owner (access_level == 'full_access')
+            new_owner_collab = next((c for c in collaborators if c.access_level == "full_access"), None)
+
+            # 2. Fallback to first Collaborator (access_level == 'status_only')
+            if not new_owner_collab:
+                new_owner_collab = collaborators[0]
+
+            new_owner_id = new_owner_collab.user_id
+            new_owner_name = new_owner_collab.user.username if new_owner_collab.user else "new owner"
+
+            # Re-assign ownership
+            task.owner_id = new_owner_id
+
+            # Remove new owner from collaborators list
+            await session.delete(new_owner_collab)
+
+            # Record history entry
+            await TaskService.record_history(
+                session,
+                task.id,
+                new_owner_id,
+                "ownership_transferred",
+                f"Ownership automatically transferred to @{new_owner_name} due to account deletion of former owner @{old_owner_name}."
+            )
+
+            # Notify new owner via WebSocket
+            plain_title = decrypt_text(task.title) or "Task"
+            await connection_manager.send_personal_message(
+                {
+                    "type": "task_ownership_transferred",
+                    "task_id": str(task.id),
+                    "task_title": plain_title,
+                    "new_owner_username": new_owner_name
+                },
+                str(new_owner_id)
+            )
+
+        await session.commit()
                                                                               

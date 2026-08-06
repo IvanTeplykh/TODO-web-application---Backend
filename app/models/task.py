@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import String, Text, Boolean, Integer, DateTime, ForeignKey
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, backref
 from app.models.base import Base
 from app.models.user import GUID
 
@@ -36,7 +36,7 @@ class TaskModel(Base):
         nullable=False
     )
 
-    owner = relationship("UserModel", backref="tasks")
+    owner = relationship("UserModel", backref=backref("tasks", passive_deletes=True))
     collaborators = relationship("TaskCollaboratorModel", back_populates="task", cascade="all, delete-orphan")
     share_requests = relationship("TaskShareRequestModel", back_populates="task", cascade="all, delete-orphan")
     history = relationship("TaskHistoryModel", back_populates="task", cascade="all, delete-orphan")
