@@ -71,6 +71,42 @@ async def get_chat_messages(
 ):
     return await chat_service.get_messages(session, current_user.id, recipient_id, limit)
 
+@router.post("/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+async def create_chat_message(
+    data: MessageCreate,
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    can_chat = await chat_service.can_users_chat(session, current_user.id, data.recipient_id)
+    if not can_chat:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Private chat request must be accepted before sending messages"
+        )
+    res = await chat_service.create_message(session, current_user.id, data)
+    payload = {
+        "type": "new_message",
+        "message": {
+            "id": str(res.id),
+            "sender_id": str(res.sender_id),
+            "sender_name": res.sender_name,
+            "sender_avatar": res.sender_avatar,
+            "recipient_id": res.recipient_id,
+            "content": res.content,
+            "content_hash": res.content_hash,
+            "created_at": res.created_at.isoformat(),
+            "is_edited": False,
+            "updated_at": None
+        }
+    }
+    if data.recipient_id == "global":
+        await connection_manager.broadcast(payload)
+    else:
+        await connection_manager.send_personal_message(payload, data.recipient_id)
+        if data.recipient_id.lower() != str(current_user.id).lower():
+            await connection_manager.send_personal_message(payload, str(current_user.id))
+    return res
+
 @router.patch("/messages/{message_id}", response_model=MessageResponse)
 async def edit_message(
     message_id: str,
