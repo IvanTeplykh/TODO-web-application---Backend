@@ -227,8 +227,10 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
     user_id_str = str(current_user.id).lower()
     connection_manager.connect(user_id_str, websocket)
 
-    # 1. Send currently connected online users to the new client
     online_ids = [uid for uid, conns in connection_manager.active_connections.items() if conns]
+    print(f"[WS CONNECTED] User @{current_user.username} ({user_id_str}) connected. Active online users: {online_ids}")
+
+    # 1. Send currently connected online users to the new client
     await websocket.send_json({
         "type": "online_users",
         "user_ids": online_ids
