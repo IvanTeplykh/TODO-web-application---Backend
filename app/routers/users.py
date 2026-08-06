@@ -9,6 +9,8 @@ from app.models.user import UserModel
 from app.core.security import verify_password, get_password_hash
 from app.core.connection_manager import connection_manager
 
+from app.utils.encryption import encrypt_text, decrypt_text
+
 router = APIRouter(prefix="/users", tags=["users"])
 
 @router.get("/search", response_model=List[UserResponse])
@@ -37,8 +39,8 @@ async def search_users(
         UserResponse(
             id=u.id,
             username=u.username,
-            email=u.email,
-            avatar_url=u.avatar_url,
+            email=decrypt_text(u.email) or u.email,
+            avatar_url=decrypt_text(u.avatar_url),
             chat_retention_days=u.chat_retention_days
         )
         for u in users
@@ -59,7 +61,7 @@ async def update_profile(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     user_db.username = profile_in.username
-    user_db.avatar_url = profile_in.avatar_url
+    user_db.avatar_url = encrypt_text(profile_in.avatar_url) if profile_in.avatar_url else None
     user_db.chat_retention_days = profile_in.chat_retention_days
     await session.commit()
     await session.refresh(user_db)
@@ -75,8 +77,8 @@ async def update_profile(
     return UserResponse(
         id=user_db.id,
         username=user_db.username,
-        email=user_db.email,
-        avatar_url=user_db.avatar_url,
+        email=decrypt_text(user_db.email) or user_db.email,
+        avatar_url=decrypt_text(user_db.avatar_url),
         chat_retention_days=user_db.chat_retention_days
     )
 

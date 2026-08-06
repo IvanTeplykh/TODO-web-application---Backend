@@ -42,7 +42,8 @@ class UserModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
-    email: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    email_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
     password: Mapped[str] = mapped_column(String(255), nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     chat_retention_days: Mapped[int] = mapped_column(Integer, default=180, server_default="180", nullable=False)

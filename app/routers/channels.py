@@ -84,7 +84,7 @@ async def get_my_pending_channel_invites(
 @router.post("/invites/{invite_id}/respond")
 async def respond_channel_invite(
     invite_id: UUID,
-    action: str = Query(..., regex="^(accept|decline)$"),
+    action: str = Query(..., pattern="^(accept|decline)$"),
     current_user: UserResponse = Depends(get_current_user),
     session: AsyncSession = Depends(get_db)
 ):

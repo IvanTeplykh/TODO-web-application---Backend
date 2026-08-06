@@ -10,6 +10,8 @@ from app.schemas.auth import TokenData
 from app.schemas.user import UserResponse
 from uuid import UUID
 
+from app.utils.encryption import decrypt_text
+
 security_scheme = HTTPBearer()
 
 async def get_current_user(
@@ -46,6 +48,6 @@ async def get_current_user(
     return UserResponse(
         id=user.id,
         username=user.username,
-        email=user.email,
-        avatar_url=user.avatar_url
+        email=decrypt_text(user.email) or user.email,
+        avatar_url=decrypt_text(user.avatar_url)
     )

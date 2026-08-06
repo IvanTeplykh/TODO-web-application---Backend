@@ -60,7 +60,7 @@ class ChatService:
         sender_res = await session.execute(sender_stmt)
         sender_user = sender_res.scalar_one_or_none()
         sender_name = sender_user.username if sender_user else "Unknown"
-        sender_avatar = sender_user.avatar_url if sender_user else None
+        sender_avatar = decrypt_text(sender_user.avatar_url) if (sender_user and sender_user.avatar_url) else None
 
         if data.recipient_id == "global":
             # Auto-cleanup expired global chat messages older than 180 days
@@ -127,7 +127,7 @@ class ChatService:
             results = []
             for msg in gc_docs:
                 s_name = msg.sender.username if msg.sender else "Unknown"
-                s_avatar = msg.sender.avatar_url if msg.sender else None
+                s_avatar = decrypt_text(msg.sender.avatar_url) if (msg.sender and msg.sender.avatar_url) else None
                 plain_content = decrypt_text(msg.content) or ""
 
                 results.append(
@@ -194,7 +194,7 @@ class ChatService:
         results = []
         for msg in docs:
             s_name = msg.sender.username if msg.sender else "Unknown"
-            s_avatar = msg.sender.avatar_url if msg.sender else None
+            s_avatar = decrypt_text(msg.sender.avatar_url) if (msg.sender and msg.sender.avatar_url) else None
             plain_content = decrypt_text(msg.content) or ""
 
             results.append(

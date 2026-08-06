@@ -44,9 +44,9 @@ class ChannelService:
 
         channel = ChannelModel(
             id=channel_id,
-            name=data.name.strip(),
-            description=data.description.strip() if data.description else None,
-            avatar_url=data.avatar_url.strip() if data.avatar_url else None,
+            name=encrypt_text(data.name.strip()),
+            description=encrypt_text(data.description.strip()) if data.description else None,
+            avatar_url=encrypt_text(data.avatar_url.strip()) if data.avatar_url else None,
             owner_id=owner_id,
             created_at=now
         )
@@ -67,9 +67,9 @@ class ChannelService:
 
         return ChannelResponse(
             id=channel.id,
-            name=channel.name,
-            description=channel.description,
-            avatar_url=channel.avatar_url,
+            name=data.name.strip(),
+            description=data.description.strip() if data.description else None,
+            avatar_url=data.avatar_url.strip() if data.avatar_url else None,
             owner_id=channel.owner_id,
             created_at=channel.created_at,
             my_role="owner",
@@ -101,9 +101,9 @@ class ChannelService:
             channels.append(
                 ChannelResponse(
                     id=channel.id,
-                    name=channel.name,
-                    description=channel.description,
-                    avatar_url=channel.avatar_url,
+                    name=decrypt_text(channel.name) or channel.name,
+                    description=decrypt_text(channel.description),
+                    avatar_url=decrypt_text(channel.avatar_url),
                     owner_id=channel.owner_id,
                     created_at=channel.created_at,
                     my_role=role,
@@ -130,7 +130,7 @@ class ChannelService:
         results = []
         for m in members:
             u_name = m.user.username if m.user else "Unknown"
-            u_avatar = m.user.avatar_url if m.user else None
+            u_avatar = decrypt_text(m.user.avatar_url) if (m.user and m.user.avatar_url) else None
             results.append(
                 ChannelMemberResponse(
                     id=m.id,
@@ -158,11 +158,11 @@ class ChannelService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
 
         if data.name is not None:
-            channel.name = data.name.strip()
+            channel.name = encrypt_text(data.name.strip())
         if data.description is not None:
-            channel.description = data.description.strip() if data.description else None
+            channel.description = encrypt_text(data.description.strip()) if data.description and data.description.strip() else None
         if data.avatar_url is not None:
-            channel.avatar_url = data.avatar_url.strip() if data.avatar_url and data.avatar_url.strip() else None
+            channel.avatar_url = encrypt_text(data.avatar_url.strip()) if data.avatar_url and data.avatar_url.strip() else None
 
         await session.commit()
         await session.refresh(channel)
@@ -174,9 +174,9 @@ class ChannelService:
 
         return ChannelResponse(
             id=channel.id,
-            name=channel.name,
-            description=channel.description,
-            avatar_url=channel.avatar_url,
+            name=decrypt_text(channel.name) or "",
+            description=decrypt_text(channel.description),
+            avatar_url=decrypt_text(channel.avatar_url),
             owner_id=channel.owner_id,
             created_at=channel.created_at,
             my_role=role,
@@ -251,7 +251,7 @@ class ChannelService:
             id=new_member.id,
             user_id=target_user.id,
             username=target_user.username,
-            avatar_url=target_user.avatar_url,
+            avatar_url=decrypt_text(target_user.avatar_url),
             role="member",
             status="pending",
             joined_at=new_member.joined_at
@@ -280,9 +280,9 @@ class ChannelService:
                     ChannelInviteResponse(
                         id=m.id,
                         channel_id=m.channel_id,
-                        channel_name=m.channel.name,
-                        channel_description=m.channel.description,
-                        channel_avatar=m.channel.avatar_url,
+                        channel_name=decrypt_text(m.channel.name) or m.channel.name,
+                        channel_description=decrypt_text(m.channel.description),
+                        channel_avatar=decrypt_text(m.channel.avatar_url),
                         created_at=m.joined_at
                     )
                 )
@@ -364,7 +364,7 @@ class ChannelService:
         await session.refresh(target_member)
 
         u_name = target_member.user.username if target_member.user else "Unknown"
-        u_avatar = target_member.user.avatar_url if target_member.user else None
+        u_avatar = decrypt_text(target_member.user.avatar_url) if (target_member.user and target_member.user.avatar_url) else None
 
         return ChannelMemberResponse(
             id=target_member.id,
@@ -410,7 +410,7 @@ class ChannelService:
             channel_id=msg.channel_id,
             sender_id=msg.sender_id,
             sender_name=sender_user.username if sender_user else "Unknown",
-            sender_avatar=sender_user.avatar_url if sender_user else None,
+            sender_avatar=decrypt_text(sender_user.avatar_url) if (sender_user and sender_user.avatar_url) else None,
             content=content,
             content_hash=c_hash,
             created_at=msg.created_at,
@@ -438,7 +438,7 @@ class ChannelService:
         for msg in messages:
             plain_content = decrypt_text(msg.content) or ""
             s_name = msg.sender.username if msg.sender else "Unknown"
-            s_avatar = msg.sender.avatar_url if msg.sender else None
+            s_avatar = decrypt_text(msg.sender.avatar_url) if (msg.sender and msg.sender.avatar_url) else None
             results.append(
                 ChannelMessageResponse(
                     id=msg.id,
@@ -482,7 +482,7 @@ class ChannelService:
         await session.refresh(msg)
 
         s_name = msg.sender.username if msg.sender else "Unknown"
-        s_avatar = msg.sender.avatar_url if msg.sender else None
+        s_avatar = decrypt_text(msg.sender.avatar_url) if (msg.sender and msg.sender.avatar_url) else None
 
         return ChannelMessageResponse(
             id=msg.id,

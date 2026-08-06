@@ -43,7 +43,7 @@ class TaskService:
             task_id=task_id,
             actor_id=actor_id,
             action=action,
-            details=details,
+            details=encrypt_text(details) if details else None,
             created_at=datetime.now(timezone.utc)
         )
         session.add(history_entry)
@@ -93,7 +93,7 @@ class TaskService:
                     id=c.id,
                     user_id=c.user_id,
                     username=c.user.username if c.user else "Unknown",
-                    avatar_url=c.user.avatar_url if c.user else None,
+                    avatar_url=decrypt_text(c.user.avatar_url) if (c.user and c.user.avatar_url) else None,
                     access_level=c.access_level,
                     created_at=c.created_at
                 )
@@ -197,12 +197,10 @@ class TaskService:
             conditions.append(and_(TaskModel.due_date.isnot(None), TaskModel.due_date < now))
         
         if search:
-            search_hash = compute_hash(search)
+            search_hash = compute_hash(search.strip())
             conditions.append(or_(
                 TaskModel.title_hash == search_hash,
-                TaskModel.description_hash == search_hash,
-                TaskModel.title.ilike(f"%{search}%"),
-                TaskModel.description.ilike(f"%{search}%")
+                TaskModel.description_hash == search_hash
             ))
             
         count_stmt = select(func.count(TaskModel.id)).where(and_(*conditions))
@@ -399,7 +397,7 @@ class TaskService:
             owner_id=owner_id,
             target_user_id=target_user.id,
             access_level=data.access_level,
-            passcode=passcode,
+            passcode=encrypt_text(passcode),
             status="pending",
             created_at=now
         )
@@ -525,7 +523,8 @@ class TaskService:
             return {"message": "Task share request declined", "status": "declined"}
 
         if action == "accept":
-            if req.passcode.strip() != passcode.strip():
+            plain_passcode = decrypt_text(req.passcode) or req.passcode
+            if plain_passcode.strip() != passcode.strip():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid passcode provided")
 
             req.status = "accepted"
@@ -650,7 +649,7 @@ class TaskService:
                     actor_id=h.actor_id,
                     actor_name=h.actor.username if h.actor else "System",
                     action=h.action,
-                    details=h.details,
+                    details=decrypt_text(h.details),
                     created_at=h.created_at
                 )
             )
@@ -732,8 +731,8 @@ class TaskService:
                     task_id=c.task_id,
                     user_id=c.user_id,
                     author_name=c.author.username if c.author else "Unknown",
-                    author_avatar_url=c.author.avatar_url if c.author else None,
-                    content=c.content,
+                    author_avatar_url=decrypt_text(c.author.avatar_url) if (c.author and c.author.avatar_url) else None,
+                    content=decrypt_text(c.content) or c.content,
                     created_at=c.created_at,
                     updated_at=c.updated_at
                 )
@@ -759,7 +758,7 @@ class TaskService:
             id=comment_id,
             task_id=task_id,
             user_id=user_id,
-            content=data.content.strip(),
+            content=encrypt_text(data.content.strip()),
             created_at=now,
             updated_at=now
         )
@@ -803,8 +802,8 @@ class TaskService:
             task_id=comment.task_id,
             user_id=comment.user_id,
             author_name=user.username if user else "Unknown",
-            author_avatar_url=user.avatar_url if user else None,
-            content=comment.content,
+            author_avatar_url=decrypt_text(user.avatar_url) if (user and user.avatar_url) else None,
+            content=data.content.strip(),
             created_at=comment.created_at,
             updated_at=comment.updated_at
         )
@@ -831,7 +830,7 @@ class TaskService:
         if comment.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only edit your own comments")
 
-        comment.content = data.content.strip()
+        comment.content = encrypt_text(data.content.strip())
         comment.updated_at = datetime.now(timezone.utc)
 
         await session.commit()
@@ -842,8 +841,8 @@ class TaskService:
             task_id=comment.task_id,
             user_id=comment.user_id,
             author_name=comment.author.username if comment.author else "Unknown",
-            author_avatar_url=comment.author.avatar_url if comment.author else None,
-            content=comment.content,
+            author_avatar_url=decrypt_text(comment.author.avatar_url) if (comment.author and comment.author.avatar_url) else None,
+            content=data.content.strip(),
             created_at=comment.created_at,
             updated_at=comment.updated_at
         )

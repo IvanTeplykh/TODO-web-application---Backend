@@ -9,17 +9,21 @@ from app.models.user import UserModel
 from app.schemas.auth import LoginRequest, Token
 from app.schemas.user import UserCreate, UserRegisterResponse
 
+from app.utils.encryption import encrypt_text, compute_hash
+
 class AuthService:
     @staticmethod
     async def check_email_exists(session: AsyncSession, email: str) -> bool:
-        stmt = select(UserModel).where(UserModel.email == email.lower())
+        e_hash = compute_hash(email.lower())
+        stmt = select(UserModel).where(UserModel.email_hash == e_hash)
         res = await session.execute(stmt)
         return res.scalar_one_or_none() is not None
 
     @staticmethod
     async def register_user(session: AsyncSession, user_in: UserCreate) -> UserRegisterResponse:
         email_lower = user_in.email.lower()
-        stmt = select(UserModel).where(UserModel.email == email_lower)
+        e_hash = compute_hash(email_lower)
+        stmt = select(UserModel).where(UserModel.email_hash == e_hash)
         res = await session.execute(stmt)
         if res.scalar_one_or_none():
             raise HTTPException(
@@ -29,11 +33,13 @@ class AuthService:
         
         user_id = uuid.uuid4()
         hashed_password = get_password_hash(user_in.password)
+        enc_email = encrypt_text(email_lower)
         
         new_user = UserModel(
             id=user_id,
             username=user_in.username,
-            email=email_lower,
+            email=enc_email,
+            email_hash=e_hash,
             password=hashed_password,
             avatar_url=None,
             created_at=datetime.now(timezone.utc)
@@ -46,7 +52,8 @@ class AuthService:
     @staticmethod
     async def authenticate_user(session: AsyncSession, login_in: LoginRequest) -> Token:
         email_lower = login_in.email.lower()
-        stmt = select(UserModel).where(UserModel.email == email_lower)
+        e_hash = compute_hash(email_lower)
+        stmt = select(UserModel).where(UserModel.email_hash == e_hash)
         res = await session.execute(stmt)
         user = res.scalar_one_or_none()
         
