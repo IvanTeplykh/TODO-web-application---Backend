@@ -22,6 +22,17 @@ from app.utils.encryption import compute_hash, decrypt_text, encrypt_text
 
 class ChannelService:
     @staticmethod
+    async def get_channel_member_ids(session: AsyncSession, channel_id: UUID) -> list[str]:
+        stmt = select(ChannelMemberModel.user_id).where(
+            and_(
+                ChannelMemberModel.channel_id == channel_id,
+                ChannelMemberModel.status == "accepted"
+            )
+        )
+        res = await session.execute(stmt)
+        return [str(uid) for uid in res.scalars().all()]
+
+    @staticmethod
     async def get_member_role(session: AsyncSession, channel_id: UUID, user_id: UUID) -> str | None:
         stmt = select(ChannelMemberModel.role).where(
             and_(

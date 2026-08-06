@@ -23,17 +23,23 @@ from app.schemas.chat import (
 from app.schemas.user import UserResponse
 from app.services.channel_service import channel_service
 from app.services.chat_service import chat_service
+from app.utils.encryption import decrypt_text
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 async def get_user_from_token_string(session: AsyncSession, token: str) -> UserResponse:
+    raw_token = token.strip().strip('"\'')
+    if raw_token.lower().startswith("bearer "):
+        raw_token = raw_token[7:].strip()
+
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(raw_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id_str: str = payload.get("sub")
         if not user_id_str:
             raise ValueError("Invalid token sub")
         user_uuid = UUID(user_id_str)
-    except (JWTError, ValueError):
+    except (JWTError, ValueError) as e:
+        print(f"[WS JWT DECODE ERROR] {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid WebSocket authentication token"
@@ -52,8 +58,8 @@ async def get_user_from_token_string(session: AsyncSession, token: str) -> UserR
     return UserResponse(
         id=user.id,
         username=user.username,
-        email=user.email,
-        avatar_url=user.avatar_url
+        email=decrypt_text(user.email) or user.email,
+        avatar_url=decrypt_text(user.avatar_url)
     )
 
 @router.get("/users", response_model=list[ChatUser])
@@ -291,11 +297,12 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(Non
                         sender_id=current_user.id,
                         content=content
                     )
+                    member_ids = await channel_service.get_channel_member_ids(session, rec_uuid)
                     msg_payload = {
                         "type": "new_channel_message",
                         "message": saved_chan_msg.model_dump(mode="json")
                     }
-                    await connection_manager.broadcast(msg_payload)
+                    await connection_manager.send_to_users(msg_payload, member_ids)
                     continue
 
                 msg_in = MessageCreate(recipient_id=recipient_id, content=content)
