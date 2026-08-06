@@ -550,4 +550,28 @@ class ChatService:
             )
         return results
 
+    @staticmethod
+    async def remove_contact(session: AsyncSession, current_user_id: UUID, target_user_id_str: str) -> dict:
+        try:
+            target_uuid = UUID(target_user_id_str)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found")
+
+        stmt = select(ChatRequestModel).where(
+            or_(
+                and_(ChatRequestModel.requester_id == current_user_id, ChatRequestModel.recipient_id == target_uuid),
+                and_(ChatRequestModel.requester_id == target_uuid, ChatRequestModel.recipient_id == current_user_id)
+            )
+        )
+        res = await session.execute(stmt)
+        req_doc = res.scalar_one_or_none()
+
+        if not req_doc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact relationship not found")
+
+        await session.delete(req_doc)
+        await session.commit()
+        return {"message": "Contact removed successfully", "user_id": str(target_uuid)}
+
+
 chat_service = ChatService()

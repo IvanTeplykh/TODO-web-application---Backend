@@ -213,6 +213,24 @@ async def respond_chat_request(
     
     return res
 
+@router.delete("/contacts/{target_user_id}")
+async def remove_contact(
+    target_user_id: str,
+    current_user: UserResponse = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    res = await chat_service.remove_contact(session, current_user.id, target_user_id)
+
+    payload = {
+        "type": "contact_removed",
+        "user_id": target_user_id,
+        "remover_id": str(current_user.id)
+    }
+    await connection_manager.send_personal_message(payload, target_user_id)
+    await connection_manager.send_personal_message(payload, str(current_user.id))
+
+    return res
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(None)):
     # 1. Accept WebSocket handshake first to establish WS protocol (prevents HTTP 500 on close)
