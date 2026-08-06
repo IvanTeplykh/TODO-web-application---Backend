@@ -391,6 +391,9 @@ class TaskService:
         passcode = f"{random.randint(100000, 999999)}"
         now = datetime.now(timezone.utc)
 
+        owner_username = task.owner.username if (task and task.owner) else "Owner"
+        target_username = target_user.username
+
         share_req = TaskShareRequestModel(
             id=uuid.uuid4(),
             task_id=task_id,
@@ -409,7 +412,7 @@ class TaskService:
             task_id,
             owner_id,
             "share_requested",
-            f"Share request ({data.access_level}) sent to @{target_user.username}"
+            f"Share request ({data.access_level}) sent to @{target_username}"
         )
 
         await session.commit()
@@ -421,7 +424,7 @@ class TaskService:
                 "request_id": str(share_req.id),
                 "task_id": str(task.id),
                 "task_title": plain_title,
-                "owner_username": task.owner.username if task.owner else "Owner",
+                "owner_username": owner_username,
                 "access_level": share_req.access_level
             },
             str(target_user.id)
@@ -432,9 +435,9 @@ class TaskService:
             task_id=task.id,
             task_title=plain_title,
             owner_id=owner_id,
-            owner_username=task.owner.username if task.owner else "Owner",
+            owner_username=owner_username,
             target_user_id=target_user.id,
-            target_username=target_user.username,
+            target_username=target_username,
             access_level=share_req.access_level,
             passcode=passcode, # Owner gets passcode to send to recipient
             status=share_req.status,
@@ -597,32 +600,36 @@ class TaskService:
                     f"Joined task as {req.access_level} collaborator"
                 )
 
+            plain_title = decrypt_text(req.task.title) if (req and req.task) else "Task"
+            target_username = req.target_user.username if (req and req.target_user) else "User"
+            task_id_str = str(req.task_id)
+            owner_id_str = str(req.owner_id)
+
             await session.commit()
 
-            plain_title = decrypt_text(req.task.title) if req.task else "Task"
             await connection_manager.send_personal_message(
                 {
                     "type": "task_share_responded",
                     "request_id": str(request_id),
-                    "task_id": str(req.task_id),
+                    "task_id": task_id_str,
                     "task_title": plain_title,
                     "action": action,
-                    "target_username": req.target_user.username if req.target_user else "User"
+                    "target_username": target_username
                 },
-                str(req.owner_id)
+                owner_id_str
             )
             await connection_manager.send_personal_message(
                 {
                     "type": "task_share_responded",
                     "request_id": str(request_id),
-                    "task_id": str(req.task_id),
+                    "task_id": task_id_str,
                     "task_title": plain_title,
                     "action": action
                 },
                 str(user_id)
             )
 
-            return {"message": "Task share request accepted", "status": "accepted", "task_id": str(req.task_id)}
+            return {"message": "Task share request accepted", "status": "accepted", "task_id": task_id_str}
 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid action")
 
