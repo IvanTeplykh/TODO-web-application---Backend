@@ -17,7 +17,9 @@ class Database:
         self.session_factory = None
 
     def connect_to_database(self, url: str | None = None):
-        db_url = url or settings.DATABASE_URL
+        raw_url = url or settings.DATABASE_URL
+        db_url = raw_url.strip().strip("'").strip('"')
+
         if db_url.startswith("postgres://"):
             db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
         elif db_url.startswith("postgresql://"):
@@ -35,12 +37,17 @@ class Database:
         if db_url.startswith("sqlite"):
             connect_args = {"check_same_thread": False}
 
-        self.engine = create_async_engine(
-            db_url,
-            echo=False,
-            connect_args=connect_args,
-            future=True
-        )
+        try:
+            self.engine = create_async_engine(
+                db_url,
+                echo=False,
+                connect_args=connect_args,
+                future=True
+            )
+        except Exception as e:
+            safe_prefix = db_url[:20] if len(db_url) > 20 else db_url
+            print(f"[ERROR] Could not parse DATABASE_URL (prefix: '{safe_prefix}'): {e}")
+            raise
         self.session_factory = async_sessionmaker(
             bind=self.engine,
             class_=AsyncSession,
