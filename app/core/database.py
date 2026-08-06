@@ -20,6 +20,9 @@ class Database:
         raw_url = url or settings.DATABASE_URL
         db_url = raw_url.strip().strip("'").strip('"')
 
+        if not db_url:
+            raise ValueError("[ERROR] DATABASE_URL is empty! Please set DATABASE_URL variable in Railway settings.")
+
         if db_url.startswith("postgres://"):
             db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
         elif db_url.startswith("postgresql://"):
