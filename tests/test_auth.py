@@ -52,6 +52,24 @@ async def test_register_duplicate_email_fails(async_client):
     assert "User with this email already exists" in res2.json()["detail"]
 
 @pytest.mark.asyncio
+async def test_register_duplicate_username_fails(async_client):
+    payload = {
+        "username": "SameUsername",
+        "email": "user1@example.com",
+        "password": "Password123!"
+    }
+    res1 = await async_client.post("/api/v1/auth/register", json=payload)
+    assert res1.status_code == 201
+
+    res2 = await async_client.post("/api/v1/auth/register", json={
+        "username": "SameUsername",
+        "email": "user2@example.com",
+        "password": "Password123!"
+    })
+    assert res2.status_code == 400
+    assert "Username already taken" in res2.json()["detail"]
+
+@pytest.mark.asyncio
 async def test_login_success(async_client):
     # Register user
     reg_payload = {

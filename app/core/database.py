@@ -53,6 +53,8 @@ class Database:
 
             table_sqls = [
                 "ALTER TABLE users ADD COLUMN chat_retention_days INTEGER DEFAULT 180;",
+                "ALTER TABLE users ADD COLUMN email_hash VARCHAR(64);",
+                "CREATE INDEX IF NOT EXISTS ix_users_email_hash ON users (email_hash);",
                 """
                 CREATE TABLE IF NOT EXISTS task_collaborators (
                     id UUID PRIMARY KEY,

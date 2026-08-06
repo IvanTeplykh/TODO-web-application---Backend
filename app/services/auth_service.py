@@ -21,6 +21,15 @@ class AuthService:
 
     @staticmethod
     async def register_user(session: AsyncSession, user_in: UserCreate) -> UserRegisterResponse:
+        # Check duplicate username
+        u_stmt = select(UserModel).where(UserModel.username.ilike(user_in.username.strip()))
+        u_res = await session.execute(u_stmt)
+        if u_res.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already taken"
+            )
+
         email_lower = user_in.email.lower()
         e_hash = compute_hash(email_lower)
         stmt = select(UserModel).where(UserModel.email_hash == e_hash)
