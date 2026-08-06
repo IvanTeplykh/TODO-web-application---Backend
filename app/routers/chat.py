@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.database import db, get_db
 from app.models.user import UserModel
+from app.models.channel import ChannelModel
 from app.core.connection_manager import connection_manager
 from app.dependencies.auth import get_current_user
 from app.schemas.chat import (
@@ -20,6 +21,7 @@ from app.schemas.chat import (
 )
 from app.schemas.user import UserResponse
 from app.services.chat_service import chat_service
+from app.services.channel_service import channel_service
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -134,11 +136,12 @@ async def send_chat_request(
 ):
     res = await chat_service.send_chat_request(session, current_user.id, data.recipient_id)
     
-    # Broadcast real-time notification to recipient
-    await connection_manager.send_personal_message({
+    payload = {
         "type": "chat_request_received",
         "request": res.model_dump(mode="json")
-    }, data.recipient_id)
+    }
+    await connection_manager.send_personal_message(payload, data.recipient_id)
+    await connection_manager.send_personal_message(payload, str(current_user.id))
     
     return res
 
@@ -220,6 +223,31 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
                     })
                     continue
 
+                try:
+                    rec_uuid = UUID(recipient_id)
+                except ValueError:
+                    rec_uuid = None
+
+                is_channel = False
+                if rec_uuid:
+                    ch_stmt = select(ChannelModel).where(ChannelModel.id == rec_uuid)
+                    ch_res = await session.execute(ch_stmt)
+                    is_channel = ch_res.scalar_one_or_none() is not None
+
+                if is_channel and rec_uuid:
+                    saved_chan_msg = await channel_service.create_channel_message(
+                        session=session,
+                        channel_id=rec_uuid,
+                        sender_id=current_user.id,
+                        content=content
+                    )
+                    msg_payload = {
+                        "type": "new_channel_message",
+                        "message": saved_chan_msg.model_dump(mode="json")
+                    }
+                    await connection_manager.broadcast(msg_payload)
+                    continue
+
                 msg_in = MessageCreate(recipient_id=recipient_id, content=content)
                 saved_msg = await chat_service.create_message(
                     session=session,
@@ -250,7 +278,9 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
                 if recipient_id != user_id_str:
                     await connection_manager.send_personal_message(msg_payload, user_id_str)
 
-    except WebSocketDisconnect:
+    except Exception:
+        pass
+    finally:
         connection_manager.disconnect(user_id_str, websocket)
         if not connection_manager.is_user_online(user_id_str):
             await connection_manager.broadcast({

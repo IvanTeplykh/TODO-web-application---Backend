@@ -418,17 +418,16 @@ class TaskService:
         await session.commit()
         await session.refresh(share_req)
 
-        await connection_manager.send_personal_message(
-            {
-                "type": "task_share_requested",
-                "request_id": str(share_req.id),
-                "task_id": str(task.id),
-                "task_title": plain_title,
-                "owner_username": owner_username,
-                "access_level": share_req.access_level
-            },
-            str(target_user.id)
-        )
+        share_payload = {
+            "type": "task_share_requested",
+            "request_id": str(share_req.id),
+            "task_id": str(task.id),
+            "task_title": plain_title,
+            "owner_username": owner_username,
+            "access_level": share_req.access_level
+        }
+        await connection_manager.send_personal_message(share_payload, str(target_user.id))
+        await connection_manager.send_personal_message(share_payload, str(owner_id))
 
         return TaskShareResponse(
             id=share_req.id,

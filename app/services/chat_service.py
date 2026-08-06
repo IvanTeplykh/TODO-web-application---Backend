@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.models.user import UserModel
 from app.models.chat import ChatRequestModel, ChatMessageModel
 from app.models.global_chat import GlobalChatMessageModel
+from app.models.channel import ChannelMemberModel
 from app.core.connection_manager import connection_manager
 from app.schemas.chat import MessageCreate, MessageResponse, ChatUser, ChatRequestResponse
 from app.utils.encryption import encrypt_text, decrypt_text, compute_hash
@@ -31,6 +32,18 @@ class ChatService:
             recipient_uuid = UUID(recipient_id_str)
         except ValueError:
             return False
+
+        # Check if recipient_id is a channel where user_a is an accepted member
+        c_stmt = select(ChannelMemberModel).where(
+            and_(
+                ChannelMemberModel.channel_id == recipient_uuid,
+                ChannelMemberModel.user_id == user_a,
+                ChannelMemberModel.status == "accepted"
+            )
+        )
+        c_res = await session.execute(c_stmt)
+        if c_res.scalar_one_or_none() is not None:
+            return True
 
         stmt = select(ChatRequestModel).where(
             and_(
