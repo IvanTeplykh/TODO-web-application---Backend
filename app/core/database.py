@@ -18,7 +18,9 @@ class Database:
 
     def connect_to_database(self, url: str | None = None):
         db_url = url or settings.DATABASE_URL
-        if db_url.startswith("postgresql://"):
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif db_url.startswith("postgresql://"):
             db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
         if "asyncpg" in db_url and "sslmode=" in db_url:
