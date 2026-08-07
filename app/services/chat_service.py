@@ -430,7 +430,10 @@ class ChatService:
             )
             .where(
                 and_(
-                    ChatRequestModel.recipient_id == current_user_id,
+                    or_(
+                        ChatRequestModel.recipient_id == current_user_id,
+                        ChatRequestModel.requester_id == current_user_id
+                    ),
                     ChatRequestModel.status == "pending"
                 )
             )
@@ -444,6 +447,7 @@ class ChatService:
             req_name = r.requester.username if r.requester else "Unknown"
             req_avatar = decrypt_field(r.requester.avatar_url) if (r.requester and r.requester.avatar_url) else None
             rec_name = r.recipient.username if r.recipient else "Unknown"
+            rec_avatar = decrypt_field(r.recipient.avatar_url) if (r.recipient and r.recipient.avatar_url) else None
 
             results.append(
                 ChatRequestResponse(
@@ -453,6 +457,7 @@ class ChatService:
                     requester_avatar=req_avatar,
                     recipient_id=r.recipient_id,
                     recipient_name=rec_name,
+                    recipient_avatar=rec_avatar,
                     status=str(r.status),
                     created_at=r.created_at
                 )
@@ -461,11 +466,19 @@ class ChatService:
 
     @staticmethod
     async def send_chat_request(session: AsyncSession, requester_id: UUID, target_identifier: str) -> ChatRequestResponse:
+        clean_ident = str(target_identifier).lstrip("@").strip()
         try:
-            target_uuid = UUID(str(target_identifier))
+            target_uuid = UUID(clean_ident)
             t_stmt = select(UserModel).where(UserModel.id == target_uuid, UserModel.deleted_at == None)
         except ValueError:
-            t_stmt = select(UserModel).where(UserModel.username.ilike(str(target_identifier).strip()), UserModel.deleted_at == None)
+            email_idx = compute_hmac_index(clean_ident.lower())
+            t_stmt = select(UserModel).where(
+                or_(
+                    UserModel.username.ilike(clean_ident),
+                    UserModel.email_index == email_idx
+                ),
+                UserModel.deleted_at == None
+            )
 
         t_res = await session.execute(t_stmt)
         target_user = t_res.scalar_one_or_none()
@@ -509,13 +522,24 @@ class ChatService:
         requester_user = u_res.scalar_one_or_none()
         requester_name = requester_user.username if requester_user else "Unknown"
         requester_avatar = decrypt_field(requester_user.avatar_url) if (requester_user and requester_user.avatar_url) else None
+        target_avatar = decrypt_field(target_user.avatar_url) if target_user.avatar_url else None
+
+        request_resp_data = {
+            "id": str(req_id),
+            "requester_id": str(requester_id),
+            "requester_name": requester_name,
+            "requester_avatar": requester_avatar,
+            "recipient_id": str(target_user.id),
+            "recipient_name": target_user.username,
+            "recipient_avatar": target_avatar,
+            "status": "pending",
+            "created_at": now.isoformat()
+        }
 
         await connection_manager.send_personal_message(
             {
                 "type": "chat_request_received",
-                "request_id": str(req_id),
-                "requester_id": str(requester_id),
-                "requester_name": requester_name
+                "request": request_resp_data
             },
             str(target_user.id)
         )
@@ -527,6 +551,7 @@ class ChatService:
             requester_avatar=requester_avatar,
             recipient_id=target_user.id,
             recipient_name=target_user.username,
+            recipient_avatar=target_avatar,
             status="pending",
             created_at=now
         )
@@ -575,6 +600,34 @@ class ChatService:
         req_name = req.requester.username if req.requester else "Unknown"
         req_avatar = decrypt_field(req.requester.avatar_url) if (req.requester and req.requester.avatar_url) else None
         rec_name = req.recipient.username if req.recipient else "Unknown"
+        rec_avatar = decrypt_field(req.recipient.avatar_url) if (req.recipient and req.recipient.avatar_url) else None
+
+        request_resp_data = {
+            "id": str(req.id),
+            "requester_id": str(req.requester_id),
+            "requester_name": req_name,
+            "requester_avatar": req_avatar,
+            "recipient_id": str(req.recipient_id),
+            "recipient_name": rec_name,
+            "recipient_avatar": rec_avatar,
+            "status": _str(req.status),
+            "created_at": req.created_at.isoformat()
+        }
+
+        await connection_manager.send_personal_message(
+            {
+                "type": "chat_request_updated",
+                "request": request_resp_data
+            },
+            str(req.requester_id)
+        )
+        await connection_manager.send_personal_message(
+            {
+                "type": "chat_request_updated",
+                "request": request_resp_data
+            },
+            str(req.recipient_id)
+        )
 
         return ChatRequestResponse(
             id=req.id,
@@ -583,6 +636,7 @@ class ChatService:
             requester_avatar=req_avatar,
             recipient_id=req.recipient_id,
             recipient_name=rec_name,
+            recipient_avatar=rec_avatar,
             status=_str(req.status),
             created_at=req.created_at
         )
