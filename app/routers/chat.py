@@ -23,7 +23,7 @@ from app.schemas.chat import (
 from app.schemas.user import UserResponse
 from app.services.channel_service import channel_service
 from app.services.chat_service import chat_service
-from app.utils.encryption import decrypt_text
+from app.core.crypto import decrypt_field
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -55,11 +55,15 @@ async def get_user_from_token_string(session: AsyncSession, token: str) -> UserR
             detail="User not found"
         )
         
+    dec_email = decrypt_field(user.email_encrypted) or user.email_encrypted
+    dec_avatar = decrypt_field(user.avatar_url) if user.avatar_url else None
+
     return UserResponse(
         id=user.id,
         username=user.username,
-        email=decrypt_text(user.email) or user.email,
-        avatar_url=decrypt_text(user.avatar_url)
+        email=dec_email,
+        avatar_url=dec_avatar,
+        chat_retention_days=user.chat_retention_days
     )
 
 @router.get("/users", response_model=list[ChatUser])
