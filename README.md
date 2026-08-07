@@ -1,6 +1,6 @@
 # TODO Web Application - Backend
 
-This project serves as the server-side (Backend) component of a web application designed for task management (TODO). It delivers a high-performance RESTful API with asynchronous request processing, JWT-based user authentication, MongoDB integration, and comprehensive data schema validation.
+This project serves as the server-side (Backend) component of a web application designed for task management (TODO). It delivers a high-performance RESTful API with asynchronous request processing, JWT-based user authentication, PostgreSQL database integration via async SQLAlchemy 2.0, and comprehensive data schema validation.
 
 ---
 
@@ -8,14 +8,14 @@ This project serves as the server-side (Backend) component of a web application 
 
 - **Programming Language**: Python 3.10+
 - **Web Framework**: FastAPI - Asynchronous, high-performance web framework for building REST APIs.
-- **Async DB Driver**: Motor - Official asynchronous MongoDB driver for Python.
-- **Database**: MongoDB (Supports both local installations and MongoDB Atlas cloud deployment).
+- **ORM & Async DB Driver**: SQLAlchemy 2.0 (Async Engine) + `asyncpg` / `aiosqlite`
+- **Database**: PostgreSQL (with support for SQLite for development/testing).
 - **Validation and Serialization**: Pydantic v2 & Pydantic Settings - Strict validation for request/response schemas and environment configurations.
 - **Authentication & Security**:
   - JWT (JSON Web Tokens via python-jose) - Access token issuing and verification.
   - Bcrypt & Passlib - Secure password hashing and verification algorithms.
 - **ASGI Server**: Uvicorn - Lightning-fast ASGI server implementation.
-- **Testing Suite**: Pytest, Pytest-Asyncio, HTTPX, MongoMock-Motor.
+- **Testing Suite**: Pytest, Pytest-Asyncio, HTTPX, SQLite in-memory / async session fixtures.
 
 ---
 
