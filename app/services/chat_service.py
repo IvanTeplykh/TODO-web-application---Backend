@@ -11,6 +11,7 @@ from app.core.connection_manager import connection_manager
 from app.core.crypto import compute_hmac_index, decrypt_field, encrypt_field
 from app.models.channel import ChannelMemberModel
 from app.models.chat import ChatMessageModel, ChatRequestModel
+from app.models.task_collaborator import RequestStatusEnum
 from app.models.global_chat import GlobalChatMessageModel
 from app.models.user import UserModel
 from app.schemas.chat import (
@@ -434,7 +435,10 @@ class ChatService:
                         ChatRequestModel.recipient_id == current_user_id,
                         ChatRequestModel.requester_id == current_user_id
                     ),
-                    ChatRequestModel.status == "pending"
+                    or_(
+                        ChatRequestModel.status == "pending",
+                        ChatRequestModel.status == RequestStatusEnum.PENDING
+                    )
                 )
             )
             .order_by(ChatRequestModel.created_at.desc())
@@ -557,15 +561,11 @@ class ChatService:
         )
 
     @staticmethod
-    async def respond_chat_request(session: AsyncSession, param1: UUID | str, param2: UUID | str, action: str) -> ChatRequestResponse:
-        p1 = str(param1)
-        p2 = str(param2)
+    async def respond_chat_request(session: AsyncSession, current_user_id: UUID, request_id: UUID | str, action: str) -> ChatRequestResponse:
         try:
-            req_uuid = UUID(p1)
-            usr_uuid = UUID(p2)
+            req_uuid = UUID(str(request_id))
         except ValueError:
-            req_uuid = UUID(p2)
-            usr_uuid = UUID(p1)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request ID")
 
         stmt = (
             select(ChatRequestModel)
@@ -574,9 +574,10 @@ class ChatService:
                 selectinload(ChatRequestModel.recipient)
             )
             .where(
+                ChatRequestModel.id == req_uuid,
                 or_(
-                    and_(ChatRequestModel.id == req_uuid, ChatRequestModel.recipient_id == usr_uuid),
-                    and_(ChatRequestModel.id == usr_uuid, ChatRequestModel.recipient_id == req_uuid)
+                    ChatRequestModel.recipient_id == current_user_id,
+                    ChatRequestModel.requester_id == current_user_id
                 )
             )
         )
