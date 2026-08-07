@@ -62,7 +62,20 @@ class Database:
     async def init_db(self):
         if self.engine:
             async with self.engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
+                def sync_schema(sync_conn):
+                    from sqlalchemy import inspect
+                    inspector = inspect(sync_conn)
+                    if inspector.has_table("users"):
+                        cols = [c["name"] for c in inspector.get_columns("users")]
+                        # If legacy columns ('email', 'password', 'email_hash') exist or 'email_encrypted' is missing,
+                        # drop old MVP tables so metadata.create_all creates the Production Privacy-First schema
+                        if "email" in cols or "email_encrypted" not in cols or "password_hash" not in cols:
+                            print("[DB MIGRATION] Legacy schema detected. Dropping old tables to recreate Production Privacy-First schema...")
+                            Base.metadata.drop_all(sync_conn)
+
+                    Base.metadata.create_all(sync_conn)
+
+                await conn.run_sync(sync_schema)
 
     async def close_database_connection(self):
         if self.engine:

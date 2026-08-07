@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    SECRET_KEY: str
+    SECRET_KEY: str = "super_secret_default_jwt_signing_key_2026_change_in_production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REMEMBER_ME_EXPIRE_DAYS: int = 30
@@ -12,5 +12,6 @@ class Settings(BaseSettings):
     HMAC_KEY: str = "super_secret_hmac_sha256_indexing_key_001"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
 
 settings = Settings()
