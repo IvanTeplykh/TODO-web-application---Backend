@@ -35,7 +35,7 @@ class ChatRequestCreate(BaseModel):
     recipient_id: str = Field(..., description="UUID of user to request chat with")
 
 class ChatRequestAction(BaseModel):
-    action: Literal["accept", "decline"]
+    action: Literal["accept", "decline", "cancel"]
 
 class ChatRequestResponse(BaseModel):
     id: UUID

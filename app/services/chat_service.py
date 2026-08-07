@@ -587,7 +587,7 @@ class ChatService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat request not found")
 
         act = action.lower()
-        if act == "decline":
+        if act in ("decline", "cancel"):
             req.status = "declined"
         elif act == "accept":
             req.status = "accepted"
