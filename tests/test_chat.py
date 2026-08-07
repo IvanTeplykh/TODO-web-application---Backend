@@ -50,11 +50,25 @@ async def test_chat_request_lifecycle(async_client: AsyncClient, authenticated_u
     me2 = await async_client.get("/api/v1/auth/me", headers=headers2)
     user2_id = me2.json()["id"]
 
+    # Before request, User 1 sees User 2 in /chat/users with connection_status "none"
+    u_list1 = await async_client.get("/api/v1/chat/users", headers=headers1)
+    assert u_list1.status_code == 200
+    u2_entry = next((u for u in u_list1.json() if u["id"] == user2_id), None)
+    assert u2_entry is not None
+    assert u2_entry["connection_status"] == "none"
+
     # User 1 sends chat request to User 2
     req_res = await async_client.post("/api/v1/chat/requests", json={"recipient_id": user2_id}, headers=headers1)
     assert req_res.status_code == 201
     request_data = req_res.json()
     assert request_data["status"] == "pending"
+
+    # After sending request, User 1 sees connection_status "pending_sent"
+    u_list_sent = await async_client.get("/api/v1/chat/users", headers=headers1)
+    assert u_list_sent.status_code == 200
+    u2_entry_sent = next((u for u in u_list_sent.json() if u["id"] == user2_id), None)
+    assert u2_entry_sent is not None
+    assert u2_entry_sent["connection_status"] == "pending_sent"
 
     # User 2 lists chat requests
     list_res = await async_client.get("/api/v1/chat/requests", headers=headers2)
@@ -67,6 +81,13 @@ async def test_chat_request_lifecycle(async_client: AsyncClient, authenticated_u
     accept_res = await async_client.patch(f"/api/v1/chat/requests/{request_id}", json={"action": "accept"}, headers=headers2)
     assert accept_res.status_code == 200
     assert accept_res.json()["status"] == "accepted"
+
+    # After accepting request, User 1 sees connection_status "accepted"
+    u_list_acc = await async_client.get("/api/v1/chat/users", headers=headers1)
+    assert u_list_acc.status_code == 200
+    u2_entry_acc = next((u for u in u_list_acc.json() if u["id"] == user2_id), None)
+    assert u2_entry_acc is not None
+    assert u2_entry_acc["connection_status"] == "accepted"
 
 @pytest.mark.asyncio
 async def test_edit_and_delete_message(async_client: AsyncClient, authenticated_user: dict):

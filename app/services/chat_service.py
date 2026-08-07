@@ -360,40 +360,62 @@ class ChatService:
 
     @staticmethod
     async def get_chat_users(session: AsyncSession, current_user_id: UUID) -> list[ChatUser]:
-        req_stmt = select(ChatRequestModel).where(
-            and_(
-                ChatRequestModel.status == "accepted",
-                or_(
-                    ChatRequestModel.requester_id == current_user_id,
-                    ChatRequestModel.recipient_id == current_user_id
+        u_stmt = (
+            select(UserModel)
+            .where(
+                and_(
+                    UserModel.id != current_user_id,
+                    UserModel.deleted_at == None
                 )
+            )
+            .order_by(UserModel.username)
+        )
+        u_res = await session.execute(u_stmt)
+        users = u_res.scalars().all()
+
+        if not users:
+            return []
+
+        req_stmt = select(ChatRequestModel).where(
+            or_(
+                ChatRequestModel.requester_id == current_user_id,
+                ChatRequestModel.recipient_id == current_user_id
             )
         )
         req_res = await session.execute(req_stmt)
         requests = req_res.scalars().all()
 
-        accepted_user_ids = set()
+        req_map: dict[UUID, ChatRequestModel] = {}
         for r in requests:
-            if r.requester_id == current_user_id:
-                accepted_user_ids.add(r.recipient_id)
-            else:
-                accepted_user_ids.add(r.requester_id)
-
-        if not accepted_user_ids:
-            return []
-
-        u_stmt = select(UserModel).where(UserModel.id.in_(accepted_user_ids), UserModel.deleted_at == None)
-        u_res = await session.execute(u_stmt)
-        users = u_res.scalars().all()
+            other_id = r.recipient_id if r.requester_id == current_user_id else r.requester_id
+            req_map[other_id] = r
 
         results = []
         for u in users:
+            req = req_map.get(u.id)
+            if not req:
+                conn_status = "none"
+            else:
+                req_status = _str(req.status).lower()
+                if req_status == "accepted":
+                    conn_status = "accepted"
+                elif req_status == "declined":
+                    conn_status = "declined"
+                elif req_status == "pending":
+                    if req.requester_id == current_user_id:
+                        conn_status = "pending_sent"
+                    else:
+                        conn_status = "pending_received"
+                else:
+                    conn_status = "none"
+
             results.append(
                 ChatUser(
                     id=u.id,
                     username=u.username,
                     avatar_url=decrypt_field(u.avatar_url),
-                    is_online=connection_manager.is_user_online(str(u.id))
+                    is_online=connection_manager.is_user_online(str(u.id)),
+                    connection_status=conn_status
                 )
             )
         return results
