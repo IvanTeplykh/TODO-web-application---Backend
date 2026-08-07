@@ -26,7 +26,12 @@ from app.schemas.chat import (
 def _str(val) -> str:
     if val is None:
         return ""
-    return val.value if hasattr(val, "value") else str(val)
+    if hasattr(val, "value"):
+        return str(val.value).lower()
+    val_str = str(val)
+    if "." in val_str:
+        val_str = val_str.split(".")[-1]
+    return val_str.lower()
 
 
 GLOBAL_CHAT_RETENTION_DAYS = 180
@@ -462,7 +467,7 @@ class ChatService:
                     recipient_id=r.recipient_id,
                     recipient_name=rec_name,
                     recipient_avatar=rec_avatar,
-                    status=str(r.status),
+                    status=_str(r.status),
                     created_at=r.created_at
                 )
             )
@@ -503,9 +508,10 @@ class ChatService:
         ex_req = ex_res.scalar_one_or_none()
 
         if ex_req:
-            if ex_req.status == "accepted":
+            st = _str(ex_req.status)
+            if st == "accepted":
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You are already chat partners")
-            if ex_req.status == "pending":
+            if st == "pending":
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chat request is already pending")
 
         req_id = uuid.uuid4()
