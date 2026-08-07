@@ -1,11 +1,23 @@
+import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
 from app.models.user import GUID
+
+
+class ChannelRoleEnum(str, enum.Enum):
+    OWNER = "owner"
+    ADMIN = "admin"
+    MEMBER = "member"
+
+
+class ChannelMemberStatusEnum(str, enum.Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
 
 
 class ChannelModel(Base):
@@ -15,6 +27,8 @@ class ChannelModel(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_private: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    invite_code_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     owner_id: Mapped[uuid.UUID] = mapped_column(
         GUID,
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -26,10 +40,17 @@ class ChannelModel(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
 
     owner = relationship("UserModel", foreign_keys=[owner_id])
     members = relationship("ChannelMemberModel", back_populates="channel", cascade="all, delete-orphan")
     messages = relationship("ChannelMessageModel", back_populates="channel", cascade="all, delete-orphan")
+
 
 class ChannelMemberModel(Base):
     __tablename__ = "channel_members"
@@ -50,16 +71,26 @@ class ChannelMemberModel(Base):
         index=True,
         nullable=False
     )
-    role: Mapped[str] = mapped_column(String(20), default="member", nullable=False) # owner, admin, member
-    status: Mapped[str] = mapped_column(String(20), default="accepted", server_default="accepted", nullable=False) # pending, accepted
+    role: Mapped[str] = mapped_column(
+        Enum(ChannelRoleEnum, native_enum=False),
+        default=ChannelRoleEnum.MEMBER.value,
+        nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        Enum(ChannelMemberStatusEnum, native_enum=False),
+        default=ChannelMemberStatusEnum.ACCEPTED.value,
+        nullable=False
+    )
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False
     )
+    last_read_message_id: Mapped[uuid.UUID | None] = mapped_column(GUID, nullable=True)
 
     channel = relationship("ChannelModel", back_populates="members")
     user = relationship("UserModel", foreign_keys=[user_id])
+
 
 class ChannelMessageModel(Base):
     __tablename__ = "channel_messages"
@@ -77,8 +108,8 @@ class ChannelMessageModel(Base):
         index=True,
         nullable=False
     )
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    content_hash: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    content_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    content_index: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     is_edited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -86,7 +117,7 @@ class ChannelMessageModel(Base):
         index=True,
         nullable=False
     )
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     channel = relationship("ChannelModel", back_populates="messages")
     sender = relationship("UserModel", foreign_keys=[sender_id])

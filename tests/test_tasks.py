@@ -1,6 +1,5 @@
-import hashlib
-
 import pytest
+from app.core.crypto import compute_hmac_index
 
 
 @pytest.mark.asyncio
@@ -19,12 +18,13 @@ async def test_create_task_success(async_client, authenticated_user):
     assert "id" in data
     assert data["title"] == "Buy groceries"
     assert data["description"] == "Milk, Eggs, Bread"
-    assert data["title_hash"] == hashlib.sha256(b"Buy groceries").hexdigest()
-    assert data["description_hash"] == hashlib.sha256(b"Milk, Eggs, Bread").hexdigest()
-    assert data["priority_hash"] == hashlib.sha256(b"8").hexdigest()
-    assert data["completed_hash"] == hashlib.sha256(b"False").hexdigest()
+    assert data["title_hash"] == compute_hmac_index("Buy groceries")
+    assert data["description_hash"] == compute_hmac_index("Milk, Eggs, Bread")
+    assert data["priority_hash"] == compute_hmac_index("8")
+    assert data["completed_hash"] == compute_hmac_index("False")
     assert data["priority"] == 8
     assert data["completed"] is False
+
 
 @pytest.mark.asyncio
 async def test_create_task_validation_errors(async_client, authenticated_user):
@@ -44,6 +44,7 @@ async def test_create_task_validation_errors(async_client, authenticated_user):
         "priority": 15
     }, headers=headers)
     assert res2.status_code == 422
+
 
 @pytest.mark.asyncio
 async def test_get_tasks_pagination_search_filtering(async_client, authenticated_user):
@@ -78,6 +79,7 @@ async def test_get_tasks_pagination_search_filtering(async_client, authenticated
     assert search_data["total"] == 1
     assert search_data["items"][0]["title"] == "Task Beta"
 
+
 @pytest.mark.asyncio
 async def test_update_task_details(async_client, authenticated_user):
     headers = authenticated_user["headers"]
@@ -98,6 +100,7 @@ async def test_update_task_details(async_client, authenticated_user):
     assert updated_data["priority"] == 9
     assert updated_data["completed"] is True
 
+
 @pytest.mark.asyncio
 async def test_delete_task(async_client, authenticated_user):
     headers = authenticated_user["headers"]
@@ -110,6 +113,7 @@ async def test_delete_task(async_client, authenticated_user):
     # Fetching deleted task should return 404
     get_res = await async_client.get(f"/api/v1/tasks/{task_id}", headers=headers)
     assert get_res.status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_task_data_isolation_between_users(async_client, authenticated_user):

@@ -7,7 +7,7 @@ from app.models.task_collaborator import (
     TaskHistoryModel,
 )
 from app.models.user import UserModel
-from app.utils.encryption import decrypt_text
+from app.core.crypto import decrypt_field
 
 
 @pytest.mark.asyncio
@@ -31,12 +31,12 @@ async def test_user_email_and_avatar_encrypted_in_db(async_client, mock_database
         assert user_db.username == "crypto_user"
 
         # Email MUST NOT be stored in plain text
-        assert user_db.email != "crypto_user@example.com"
-        assert user_db.email.startswith("gAAAAA")  # Fernet encrypted token
-        assert decrypt_text(user_db.email) == "crypto_user@example.com"
+        assert user_db.email_encrypted != "crypto_user@example.com"
+        assert decrypt_field(user_db.email_encrypted) == "crypto_user@example.com"
 
-        # email_hash MUST be populated
-        assert user_db.email_hash is not None
+        # email_index MUST be populated (HMAC-SHA256)
+        assert user_db.email_index is not None
+
 
 @pytest.mark.asyncio
 async def test_channel_metadata_encrypted_in_db(async_client, authenticated_user, mock_database):
@@ -60,15 +60,12 @@ async def test_channel_metadata_encrypted_in_db(async_client, authenticated_user
 
         # Fields MUST NOT be stored in plain text
         assert channel_db.name != "Secret Channel 42"
-        assert channel_db.name.startswith("gAAAAA")
-        assert decrypt_text(channel_db.name) == "Secret Channel 42"
+        assert decrypt_field(channel_db.name) == "Secret Channel 42"
 
         assert channel_db.description != "Top secret discussions"
-        assert channel_db.description.startswith("gAAAAA")
-        assert decrypt_text(channel_db.description) == "Top secret discussions"
+        assert decrypt_field(channel_db.description) == "Top secret discussions"
 
-        assert channel_db.avatar_url.startswith("gAAAAA")
-        assert decrypt_text(channel_db.avatar_url) == "https://example.com/secret_avatar.png"
+        assert decrypt_field(channel_db.avatar_url) == "https://example.com/secret_avatar.png"
 
     # Verify API GET returns decrypted plain text
     get_resp = await async_client.get("/api/v1/channels", headers=headers)
@@ -78,6 +75,7 @@ async def test_channel_metadata_encrypted_in_db(async_client, authenticated_user
     assert my_channels[0]["name"] == "Secret Channel 42"
     assert my_channels[0]["description"] == "Top secret discussions"
     assert my_channels[0]["avatar_url"] == "https://example.com/secret_avatar.png"
+
 
 @pytest.mark.asyncio
 async def test_comments_and_history_encrypted_in_db(async_client, authenticated_user, mock_database):
@@ -105,9 +103,8 @@ async def test_comments_and_history_encrypted_in_db(async_client, authenticated_
         comment_res = await session.execute(comment_stmt)
         comment_db = comment_res.scalar_one()
 
-        assert comment_db.content != "Confidential comment payload"
-        assert comment_db.content.startswith("gAAAAA")
-        assert decrypt_text(comment_db.content) == "Confidential comment payload"
+        assert comment_db.content_encrypted != "Confidential comment payload"
+        assert decrypt_field(comment_db.content_encrypted) == "Confidential comment payload"
 
         history_stmt = select(TaskHistoryModel).where(TaskHistoryModel.task_id == task_id)
         history_res = await session.execute(history_stmt)
@@ -115,7 +112,7 @@ async def test_comments_and_history_encrypted_in_db(async_client, authenticated_
 
         for h in history_entries:
             if h.details:
-                assert h.details.startswith("gAAAAA")
+                assert decrypt_field(h.details) is not None
 
     # 3. Verify API GET comments & history return decrypted plain text
     comments_get = await async_client.get(f"/api/v1/tasks/{task_id}/comments", headers=headers)

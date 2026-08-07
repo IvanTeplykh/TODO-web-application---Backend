@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.connection_manager import connection_manager
+from app.core.crypto import compute_hmac_index, decrypt_field, encrypt_field
+from app.core.security import get_passcode_hash, verify_passcode
 from app.models.task import TaskModel
 from app.models.task_collaborator import (
     TaskCollaboratorModel,
@@ -32,8 +34,13 @@ from app.schemas.task import (
     TaskStatusUpdate,
     TaskUpdate,
 )
-from app.utils.encryption import compute_hash, decrypt_text, encrypt_text
 from app.utils.pagination import PaginatedResponse
+
+
+def _str(val) -> str:
+    if val is None:
+        return ""
+    return val.value if hasattr(val, "value") else str(val)
 
 
 class TaskService:
@@ -50,27 +57,25 @@ class TaskService:
             task_id=task_id,
             actor_id=actor_id,
             action=action,
-            details=encrypt_text(details) if details else None,
+            details=encrypt_field(details) if details else None,
             created_at=datetime.now(timezone.utc)
         )
         session.add(history_entry)
 
     @staticmethod
     async def _to_response(session: AsyncSession, task: TaskModel, current_user_id: UUID) -> TaskResponse:
-        plain_title = decrypt_text(task.title) or ""
-        plain_desc = decrypt_text(task.description)
-        
-        t_hash = task.title_hash or compute_hash(plain_title)
-        d_hash = task.description_hash or compute_hash(plain_desc)
-        p_hash = task.priority_hash or compute_hash(str(task.priority))
-        c_hash = task.completed_hash or compute_hash(str(task.completed))
+        plain_title = decrypt_field(task.title_encrypted) or ""
+        plain_desc = decrypt_field(task.description_encrypted)
 
-        # Determine owner username
+        t_hash = task.title_index or compute_hmac_index(plain_title)
+        d_hash = task.description_index or (compute_hmac_index(plain_desc) if plain_desc else None)
+        p_hash = compute_hmac_index(str(task.priority))
+        c_hash = compute_hmac_index(str(task.completed))
+
         u_stmt = select(UserModel.username).where(UserModel.id == task.owner_id)
         u_res = await session.execute(u_stmt)
         owner_name = u_res.scalar_one_or_none() or "Unknown"
 
-        # Determine my_access_level
         if task.owner_id == current_user_id:
             my_access_level = "owner"
         else:
@@ -81,9 +86,9 @@ class TaskService:
                 )
             )
             collab_res = await session.execute(collab_stmt)
-            my_access_level = collab_res.scalar_one_or_none() or "status_only"
+            raw_access = collab_res.scalar_one_or_none()
+            my_access_level = _str(raw_access) if raw_access else "status_only"
 
-        # Load collaborators
         collab_query = (
             select(TaskCollaboratorModel)
             .options(selectinload(TaskCollaboratorModel.user))
@@ -95,18 +100,18 @@ class TaskService:
 
         collab_responses = []
         for c in collab_models:
+            dec_avatar = decrypt_field(c.user.avatar_url) if (c.user and c.user.avatar_url) else None
             collab_responses.append(
                 TaskCollaboratorResponse(
                     id=c.id,
                     user_id=c.user_id,
                     username=c.user.username if c.user else "Unknown",
-                    avatar_url=decrypt_text(c.user.avatar_url) if (c.user and c.user.avatar_url) else None,
-                    access_level=c.access_level,
+                    avatar_url=dec_avatar,
+                    access_level=_str(c.access_level),
                     created_at=c.created_at
                 )
             )
 
-        # Unread comments check
         read_stmt = select(TaskReadStatusModel.last_read_at).where(
             and_(TaskReadStatusModel.task_id == task.id, TaskReadStatusModel.user_id == current_user_id)
         )
@@ -149,30 +154,27 @@ class TaskService:
     async def create_task(session: AsyncSession, task_in: TaskCreate, owner_id: UUID) -> TaskResponse:
         task_id = uuid.uuid4()
         now = datetime.now(timezone.utc)
-        
-        enc_title = encrypt_text(task_in.title)
-        enc_desc = encrypt_text(task_in.description)
-        t_hash = compute_hash(task_in.title)
-        d_hash = compute_hash(task_in.description)
-        p_hash = compute_hash(str(task_in.priority))
-        c_hash = compute_hash("False")
+
+        enc_title = encrypt_field(task_in.title)
+        t_index = compute_hmac_index(task_in.title)
+
+        enc_desc = encrypt_field(task_in.description) if task_in.description else None
+        d_index = compute_hmac_index(task_in.description) if task_in.description else None
 
         new_task = TaskModel(
             id=task_id,
             owner_id=owner_id,
-            title=enc_title,
-            title_hash=t_hash,
+            title_encrypted=enc_title,
+            title_index=t_index,
             completed=False,
-            completed_hash=c_hash,
             priority=task_in.priority,
-            priority_hash=p_hash,
-            description=enc_desc,
-            description_hash=d_hash,
+            description_encrypted=enc_desc,
+            description_index=d_index,
             due_date=task_in.due_date,
             created_at=now,
             updated_at=now
         )
-        
+
         session.add(new_task)
         await TaskService.record_history(session, task_id, owner_id, "created", f"Task created: '{task_in.title}'")
         await session.commit()
@@ -190,10 +192,12 @@ class TaskService:
         sort: str,
         order: str
     ) -> PaginatedResponse[TaskResponse]:
-        # Task IDs owned by user or shared with user
         subq = select(TaskCollaboratorModel.task_id).where(TaskCollaboratorModel.user_id == owner_id)
-        conditions = [or_(TaskModel.owner_id == owner_id, TaskModel.id.in_(subq))]
-        
+        conditions = [
+            TaskModel.deleted_at == None,
+            or_(TaskModel.owner_id == owner_id, TaskModel.id.in_(subq))
+        ]
+
         now = datetime.now(timezone.utc)
         if status_filter == "done":
             conditions.append(TaskModel.completed.is_(True))
@@ -218,23 +222,22 @@ class TaskService:
                 )
             )
             conditions.append(TaskModel.id.in_(co_subq))
-        
-        if search:
-            search_hash = compute_hash(search.strip())
+
+        if search and search.strip():
+            search_index = compute_hmac_index(search)
             conditions.append(or_(
-                TaskModel.title_hash == search_hash,
-                TaskModel.description_hash == search_hash
+                TaskModel.title_index == search_index,
+                TaskModel.description_index == search_index
             ))
-            
+
         count_stmt = select(func.count(TaskModel.id)).where(and_(*conditions))
         count_res = await session.execute(count_stmt)
         total = count_res.scalar() or 0
-        
+
         allowed_sort_map = {
             "priority": TaskModel.priority,
             "created_at": TaskModel.created_at,
             "updated_at": TaskModel.updated_at,
-            "title": TaskModel.title,
             "completed": TaskModel.completed,
             "due_date": TaskModel.due_date
         }
@@ -251,134 +254,151 @@ class TaskService:
             .limit(limit)
         )
         res = await session.execute(stmt)
-        task_docs = res.scalars().all()
+        tasks = res.scalars().all()
 
-        pages = math.ceil(total / limit) if total > 0 else 1
-        items = [await TaskService._to_response(session, task, owner_id) for task in task_docs]
-        
+        items = []
+        for t in tasks:
+            items.append(await TaskService._to_response(session, t, owner_id))
+
+        total_pages = math.ceil(total / limit) if limit > 0 else 1
         return PaginatedResponse[TaskResponse](
             items=items,
             total=total,
             page=page,
-            pages=pages
+            pages=total_pages
         )
 
     @staticmethod
-    async def get_task_by_id(session: AsyncSession, task_id: UUID, owner_id: UUID) -> TaskResponse:
-        stmt = select(TaskModel).options(selectinload(TaskModel.owner)).where(TaskModel.id == task_id)
+    async def get_task_by_id(session: AsyncSession, task_id: UUID, user_id: UUID = None, owner_id: UUID = None) -> TaskResponse:
+        u_id = user_id or owner_id
+        stmt = select(TaskModel).where(TaskModel.id == task_id, TaskModel.deleted_at == None)
         res = await session.execute(stmt)
         task = res.scalar_one_or_none()
 
         if not task:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-        
-        is_owner = (task.owner_id == owner_id)
-        collab_stmt = select(TaskCollaboratorModel).where(
-            and_(TaskCollaboratorModel.task_id == task_id, TaskCollaboratorModel.user_id == owner_id)
-        )
-        collab_res = await session.execute(collab_stmt)
-        is_collab = collab_res.scalar_one_or_none() is not None
 
-        if not is_owner and not is_collab:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to access this task")
-            
-        return await TaskService._to_response(session, task, owner_id)
+        if task.owner_id != u_id:
+            collab_stmt = select(TaskCollaboratorModel).where(
+                and_(TaskCollaboratorModel.task_id == task_id, TaskCollaboratorModel.user_id == u_id)
+            )
+            collab_res = await session.execute(collab_stmt)
+            collab = collab_res.scalar_one_or_none()
+            if not collab:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+        return await TaskService._to_response(session, task, u_id)
 
     @staticmethod
-    async def update_task(session: AsyncSession, task_id: UUID, task_in: TaskUpdate, owner_id: UUID) -> TaskResponse:
-        stmt = select(TaskModel).options(selectinload(TaskModel.owner)).where(TaskModel.id == task_id)
+    async def update_task(session: AsyncSession, task_id: UUID, task_in: TaskUpdate, user_id: UUID = None, owner_id: UUID = None) -> TaskResponse:
+        u_id = user_id or owner_id
+        stmt = select(TaskModel).where(TaskModel.id == task_id, TaskModel.deleted_at == None)
         res = await session.execute(stmt)
         task = res.scalar_one_or_none()
 
         if not task:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-        
-        is_owner = (task.owner_id == owner_id)
-        collab_stmt = select(TaskCollaboratorModel.access_level).where(
-            and_(TaskCollaboratorModel.task_id == task_id, TaskCollaboratorModel.user_id == owner_id)
-        )
-        collab_res = await session.execute(collab_stmt)
-        collab_level = collab_res.scalar_one_or_none()
 
-        if not is_owner and collab_level != "full_access":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to modify task details")
-            
-        enc_title = encrypt_text(task_in.title)
-        enc_desc = encrypt_text(task_in.description)
-        t_hash = compute_hash(task_in.title)
-        d_hash = compute_hash(task_in.description)
-        p_hash = compute_hash(str(task_in.priority))
-        c_hash = compute_hash(str(task_in.completed))
+        if task.owner_id != u_id:
+            collab_stmt = select(TaskCollaboratorModel).where(
+                and_(TaskCollaboratorModel.task_id == task_id, TaskCollaboratorModel.user_id == u_id)
+            )
+            collab_res = await session.execute(collab_stmt)
+            collab = collab_res.scalar_one_or_none()
 
-        task.title = enc_title
-        task.title_hash = t_hash
+            if not collab or _str(collab.access_level) != "full_access":
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only task owner or co-owner with full access can edit full task details")
+
+        task.title_encrypted = encrypt_field(task_in.title)
+        task.title_index = compute_hmac_index(task_in.title)
+
+        task.description_encrypted = encrypt_field(task_in.description) if task_in.description else None
+        task.description_index = compute_hmac_index(task_in.description) if task_in.description else None
+
         task.priority = task_in.priority
-        task.priority_hash = p_hash
         task.completed = task_in.completed
-        task.completed_hash = c_hash
-        task.description = enc_desc
-        task.description_hash = d_hash
         task.due_date = task_in.due_date
         task.updated_at = datetime.now(timezone.utc)
-        
-        await TaskService.record_history(session, task_id, owner_id, "updated", f"Task updated: '{task_in.title}'")
+
+        await TaskService.record_history(session, task_id, u_id, "updated", f"Task updated: '{task_in.title}'")
         await session.commit()
         await session.refresh(task)
-        return await TaskService._to_response(session, task, owner_id)
+        return await TaskService._to_response(session, task, u_id)
 
     @staticmethod
-    async def update_task_status(session: AsyncSession, task_id: UUID, status_in: TaskStatusUpdate, owner_id: UUID) -> TaskResponse:
-        stmt = select(TaskModel).options(selectinload(TaskModel.owner)).where(TaskModel.id == task_id)
+    async def update_task_status(session: AsyncSession, task_id: UUID, status_in: TaskStatusUpdate, user_id: UUID = None, owner_id: UUID = None) -> TaskResponse:
+        u_id = user_id or owner_id
+        stmt = select(TaskModel).where(TaskModel.id == task_id, TaskModel.deleted_at == None)
         res = await session.execute(stmt)
         task = res.scalar_one_or_none()
 
         if not task:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-        
-        is_owner = (task.owner_id == owner_id)
-        collab_stmt = select(TaskCollaboratorModel).where(
-            and_(TaskCollaboratorModel.task_id == task_id, TaskCollaboratorModel.user_id == owner_id)
-        )
-        collab_res = await session.execute(collab_stmt)
-        is_collab = collab_res.scalar_one_or_none() is not None
 
-        if not is_owner and not is_collab:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to modify task status")
-            
-        c_hash = compute_hash(str(status_in.completed))
+        if task.owner_id != u_id:
+            collab_stmt = select(TaskCollaboratorModel).where(
+                and_(TaskCollaboratorModel.task_id == task_id, TaskCollaboratorModel.user_id == u_id)
+            )
+            collab_res = await session.execute(collab_stmt)
+            if not collab_res.scalar_one_or_none():
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
         task.completed = status_in.completed
-        task.completed_hash = c_hash
         task.updated_at = datetime.now(timezone.utc)
-        
-        status_text = "completed" if status_in.completed else "pending"
-        await TaskService.record_history(session, task_id, owner_id, "status_changed", f"Task status set to {status_text}")
+
+        action_str = "status_changed"
+        await TaskService.record_history(session, task_id, u_id, action_str, f"Status changed to {status_in.completed}")
         await session.commit()
         await session.refresh(task)
-        return await TaskService._to_response(session, task, owner_id)
+
+        target_ids = set()
+        if task.owner_id != u_id:
+            target_ids.add(str(task.owner_id))
+
+        c_stmt = select(TaskCollaboratorModel.user_id).where(
+            and_(TaskCollaboratorModel.task_id == task_id, TaskCollaboratorModel.user_id != u_id)
+        )
+        c_res = await session.execute(c_stmt)
+        for c_id in c_res.scalars().all():
+            target_ids.add(str(c_id))
+
+        plain_title = decrypt_field(task.title_encrypted) or "Task"
+        for tid in target_ids:
+            await connection_manager.send_personal_message(
+                {
+                    "type": "task_status_changed",
+                    "task_id": str(task_id),
+                    "task_title": plain_title,
+                    "completed": status_in.completed
+                },
+                tid
+            )
+
+        return await TaskService._to_response(session, task, u_id)
 
     @staticmethod
-    async def delete_task(session: AsyncSession, task_id: UUID, owner_id: UUID) -> None:
-        stmt = select(TaskModel).where(TaskModel.id == task_id)
+    async def delete_task(session: AsyncSession, task_id: UUID, owner_id: UUID = None, user_id: UUID = None) -> None:
+        u_id = owner_id or user_id
+        stmt = select(TaskModel).where(TaskModel.id == task_id, TaskModel.deleted_at == None)
         res = await session.execute(stmt)
         task = res.scalar_one_or_none()
 
         if not task:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-        
-        if task.owner_id != owner_id:
+
+        if task.owner_id != u_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only task owner can delete this task")
-            
-        await session.delete(task)
+
+        task.deleted_at = datetime.now(timezone.utc)
         await session.commit()
 
     @staticmethod
-    async def create_share_request(
-        session: AsyncSession,
-        task_id: UUID,
-        owner_id: UUID,
-        data: TaskShareCreate
-    ) -> TaskShareResponse:
-        stmt = select(TaskModel).options(selectinload(TaskModel.owner)).where(TaskModel.id == task_id)
+    async def create_share_request(session: AsyncSession, task_id: UUID, owner_id: UUID, data: TaskShareCreate) -> TaskShareResponse:
+        stmt = (
+            select(TaskModel)
+            .options(selectinload(TaskModel.owner))
+            .where(TaskModel.id == task_id, TaskModel.deleted_at == None)
+        )
         res = await session.execute(stmt)
         task = res.scalar_one_or_none()
 
@@ -386,32 +406,20 @@ class TaskService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
         if task.owner_id != owner_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only task owner can invite/transfer users")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only task owner can initiate share or ownership transfer requests")
 
-        u_stmt = select(UserModel).where(func.lower(UserModel.username) == data.target_username.strip().lower())
-        u_res = await session.execute(u_stmt)
-        target_user = u_res.scalar_one_or_none()
+        t_stmt = select(UserModel).where(UserModel.username.ilike(data.target_username.strip()), UserModel.deleted_at == None)
+        t_res = await session.execute(t_stmt)
+        target_user = t_res.scalar_one_or_none()
 
         if not target_user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User @{data.target_username} not found")
 
         if target_user.id == owner_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot share task with yourself")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot share a task with yourself")
 
-        # Check existing pending share request
-        ex_req_stmt = select(TaskShareRequestModel).where(
-            and_(
-                TaskShareRequestModel.task_id == task_id,
-                TaskShareRequestModel.target_user_id == target_user.id,
-                TaskShareRequestModel.status == "pending"
-            )
-        )
-        ex_req_res = await session.execute(ex_req_stmt)
-        if ex_req_res.scalar_one_or_none():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pending invitation already sent to this user")
-
-        # Generate 6-digit passcode
         passcode = f"{random.randint(100000, 999999)}"
+        passcode_hash = get_passcode_hash(passcode)
         now = datetime.now(timezone.utc)
 
         owner_username = task.owner.username if (task and task.owner) else "Owner"
@@ -423,13 +431,13 @@ class TaskService:
             owner_id=owner_id,
             target_user_id=target_user.id,
             access_level=data.access_level,
-            passcode=encrypt_text(passcode),
+            passcode_hash=passcode_hash,
             status="pending",
             created_at=now
         )
         session.add(share_req)
 
-        plain_title = decrypt_text(task.title) or "Task"
+        plain_title = decrypt_field(task.title_encrypted) or "Task"
         await TaskService.record_history(
             session,
             task_id,
@@ -447,7 +455,7 @@ class TaskService:
             "task_id": str(task.id),
             "task_title": plain_title,
             "owner_username": owner_username,
-            "access_level": share_req.access_level
+            "access_level": _str(share_req.access_level)
         }
         await connection_manager.send_personal_message(share_payload, str(target_user.id))
         await connection_manager.send_personal_message(share_payload, str(owner_id))
@@ -460,9 +468,9 @@ class TaskService:
             owner_username=owner_username,
             target_user_id=target_user.id,
             target_username=target_username,
-            access_level=share_req.access_level,
-            passcode=passcode, # Owner gets passcode to send to recipient
-            status=share_req.status,
+            access_level=_str(share_req.access_level),
+            passcode=passcode,
+            status=_str(share_req.status),
             created_at=share_req.created_at
         )
 
@@ -488,7 +496,7 @@ class TaskService:
 
         results = []
         for req in requests:
-            plain_title = decrypt_text(req.task.title) if req.task else "Task"
+            plain_title = decrypt_field(req.task.title_encrypted) if req.task else "Task"
             results.append(
                 TaskShareResponse(
                     id=req.id,
@@ -498,9 +506,9 @@ class TaskService:
                     owner_username=req.owner.username if req.owner else "Owner",
                     target_user_id=req.target_user_id,
                     target_username=req.target_user.username if req.target_user else "User",
-                    access_level=req.access_level,
-                    passcode=None, # Hidden for recipient until entered
-                    status=req.status,
+                    access_level=_str(req.access_level),
+                    passcode=None,
+                    status=_str(req.status),
                     created_at=req.created_at
                 )
             )
@@ -548,19 +556,18 @@ class TaskService:
             return {"message": "Task share request declined", "status": "declined"}
 
         if action == "accept":
-            plain_passcode = decrypt_text(req.passcode) or req.passcode
-            if plain_passcode.strip() != passcode.strip():
+            if not verify_passcode(passcode.strip(), req.passcode_hash):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid passcode provided")
 
             req.status = "accepted"
+            req.accepted_at = datetime.now(timezone.utc)
 
-            if req.access_level == "transfer":
+            if _str(req.access_level) == "transfer":
                 old_owner_id = req.owner_id
                 old_owner_name = req.owner.username if req.owner else "previous owner"
                 new_owner_name = req.target_user.username if req.target_user else "new owner"
                 req.task.owner_id = user_id
-                
-                # Clean up existing collaborator record for new owner if present
+
                 del_collab = select(TaskCollaboratorModel).where(
                     and_(TaskCollaboratorModel.task_id == req.task_id, TaskCollaboratorModel.user_id == user_id)
                 )
@@ -569,7 +576,6 @@ class TaskService:
                 if existing_c:
                     await session.delete(existing_c)
 
-                # Add old owner as a status_only collaborator
                 old_c_stmt = select(TaskCollaboratorModel).where(
                     and_(TaskCollaboratorModel.task_id == req.task_id, TaskCollaboratorModel.user_id == old_owner_id)
                 )
@@ -592,10 +598,9 @@ class TaskService:
                     req.task_id,
                     user_id,
                     "ownership_transferred",
-                    f"Ownership transferred from @{old_owner_name} to @{new_owner_name}. @{old_owner_name} is now a status-only collaborator."
+                    f"Ownership transferred from @{old_owner_name} to @{new_owner_name}."
                 )
             else:
-                # Add or update collaborator
                 ex_c_stmt = select(TaskCollaboratorModel).where(
                     and_(TaskCollaboratorModel.task_id == req.task_id, TaskCollaboratorModel.user_id == user_id)
                 )
@@ -619,10 +624,10 @@ class TaskService:
                     req.task_id,
                     user_id,
                     "share_accepted",
-                    f"Joined task as {req.access_level} collaborator"
+                    f"Joined task as {_str(req.access_level)} collaborator"
                 )
 
-            plain_title = decrypt_text(req.task.title) if (req and req.task) else "Task"
+            plain_title = decrypt_field(req.task.title_encrypted) if (req and req.task) else "Task"
             target_username = req.target_user.username if (req and req.target_user) else "User"
             task_id_str = str(req.task_id)
             owner_id_str = str(req.owner_id)
@@ -657,7 +662,6 @@ class TaskService:
 
     @staticmethod
     async def get_task_history(session: AsyncSession, task_id: UUID, user_id: UUID) -> list[TaskHistoryResponse]:
-        # Permission check
         await TaskService.get_task_by_id(session, task_id, user_id)
 
         stmt = (
@@ -678,7 +682,7 @@ class TaskService:
                     actor_id=h.actor_id,
                     actor_name=h.actor.username if h.actor else "System",
                     action=h.action,
-                    details=decrypt_text(h.details),
+                    details=decrypt_field(h.details),
                     created_at=h.created_at
                 )
             )
@@ -686,7 +690,7 @@ class TaskService:
 
     @staticmethod
     async def remove_collaborator(session: AsyncSession, task_id: UUID, owner_id: UUID, target_user_id: UUID) -> dict:
-        stmt = select(TaskModel).where(TaskModel.id == task_id)
+        stmt = select(TaskModel).where(TaskModel.id == task_id, TaskModel.deleted_at == None)
         res = await session.execute(stmt)
         task = res.scalar_one_or_none()
 
@@ -724,7 +728,6 @@ class TaskService:
     async def get_task_comments(session: AsyncSession, task_id: UUID, user_id: UUID) -> list[TaskCommentResponse]:
         await TaskService.get_task_by_id(session, task_id, user_id)
 
-        # Mark comments as read for user
         read_stmt = select(TaskReadStatusModel).where(
             and_(TaskReadStatusModel.task_id == task_id, TaskReadStatusModel.user_id == user_id)
         )
@@ -754,14 +757,16 @@ class TaskService:
 
         results = []
         for c in comments:
+            dec_avatar = decrypt_field(c.author.avatar_url) if (c.author and c.author.avatar_url) else None
+            dec_content = decrypt_field(c.content_encrypted) or ""
             results.append(
                 TaskCommentResponse(
                     id=c.id,
                     task_id=c.task_id,
                     user_id=c.user_id,
                     author_name=c.author.username if c.author else "Unknown",
-                    author_avatar_url=decrypt_text(c.author.avatar_url) if (c.author and c.author.avatar_url) else None,
-                    content=decrypt_text(c.content) or c.content,
+                    author_avatar_url=dec_avatar,
+                    content=dec_content,
                     created_at=c.created_at,
                     updated_at=c.updated_at
                 )
@@ -781,12 +786,12 @@ class TaskService:
         u_res = await session.execute(u_stmt)
         user = u_res.scalar_one_or_none()
         author_name = user.username if user else "Unknown"
-        author_avatar = decrypt_text(user.avatar_url) if (user and user.avatar_url) else None
+        author_avatar = decrypt_field(user.avatar_url) if (user and user.avatar_url) else None
 
         task_stmt = (
             select(TaskModel)
             .options(selectinload(TaskModel.collaborators))
-            .where(TaskModel.id == task_id)
+            .where(TaskModel.id == task_id, TaskModel.deleted_at == None)
         )
         task_res = await session.execute(task_stmt)
         task_db = task_res.scalar_one_or_none()
@@ -801,17 +806,19 @@ class TaskService:
 
         comment_id = uuid.uuid4()
         now = datetime.now(timezone.utc)
+        clean_content = data.content.strip()
         comment = TaskCommentModel(
             id=comment_id,
             task_id=task_id,
             user_id=user_id,
-            content=encrypt_text(data.content.strip()),
+            content_encrypted=encrypt_field(clean_content),
+            content_index=compute_hmac_index(clean_content),
             created_at=now,
             updated_at=now
         )
         session.add(comment)
 
-        preview = data.content.strip()[:30] + ("..." if len(data.content.strip()) > 30 else "")
+        preview = clean_content[:30] + ("..." if len(clean_content) > 30 else "")
         await TaskService.record_history(session, task_id, user_id, "comment_added", f"Comment added: '{preview}'")
 
         await session.commit()
@@ -832,7 +839,7 @@ class TaskService:
             user_id=user_id,
             author_name=author_name,
             author_avatar_url=author_avatar,
-            content=data.content.strip(),
+            content=clean_content,
             created_at=now,
             updated_at=now
         )
@@ -860,10 +867,12 @@ class TaskService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only edit your own comments")
 
         author_name = comment.author.username if comment.author else "Unknown"
-        author_avatar = decrypt_text(comment.author.avatar_url) if (comment.author and comment.author.avatar_url) else None
+        author_avatar = decrypt_field(comment.author.avatar_url) if (comment.author and comment.author.avatar_url) else None
 
+        clean_content = data.content.strip()
         updated_at = datetime.now(timezone.utc)
-        comment.content = encrypt_text(data.content.strip())
+        comment.content_encrypted = encrypt_field(clean_content)
+        comment.content_index = compute_hmac_index(clean_content)
         comment.updated_at = updated_at
 
         await session.commit()
@@ -874,7 +883,7 @@ class TaskService:
             user_id=comment.user_id,
             author_name=author_name,
             author_avatar_url=author_avatar,
-            content=data.content.strip(),
+            content=clean_content,
             created_at=comment.created_at,
             updated_at=updated_at
         )
@@ -886,7 +895,7 @@ class TaskService:
         comment_id: UUID,
         user_id: UUID
     ) -> None:
-        task_stmt = select(TaskModel).where(TaskModel.id == task_id)
+        task_stmt = select(TaskModel).where(TaskModel.id == task_id, TaskModel.deleted_at == None)
         task_res = await session.execute(task_stmt)
         task = task_res.scalar_one_or_none()
 
@@ -908,7 +917,7 @@ class TaskService:
 
     @staticmethod
     async def reassign_tasks_before_user_deletion(session: AsyncSession, user_id: UUID) -> None:
-        task_stmt = select(TaskModel).where(TaskModel.owner_id == user_id)
+        task_stmt = select(TaskModel).where(TaskModel.owner_id == user_id, TaskModel.deleted_at == None)
         task_res = await session.execute(task_stmt)
         owned_tasks = task_res.scalars().all()
 
@@ -934,23 +943,16 @@ class TaskService:
             if not collaborators:
                 continue
 
-            # 1. Search for first Co-Owner (access_level == 'full_access')
-            new_owner_collab = next((c for c in collaborators if c.access_level == "full_access"), None)
-
-            # 2. Fallback to first Collaborator (access_level == 'status_only')
+            new_owner_collab = next((c for c in collaborators if _str(c.access_level) == "full_access"), None)
             if not new_owner_collab:
                 new_owner_collab = collaborators[0]
 
             new_owner_id = new_owner_collab.user_id
             new_owner_name = new_owner_collab.user.username if new_owner_collab.user else "new owner"
 
-            # Re-assign ownership
             task.owner_id = new_owner_id
-
-            # Remove new owner from collaborators list
             await session.delete(new_owner_collab)
 
-            # Record history entry
             await TaskService.record_history(
                 session,
                 task.id,
@@ -959,8 +961,7 @@ class TaskService:
                 f"Ownership automatically transferred to @{new_owner_name} due to account deletion of former owner @{old_owner_name}."
             )
 
-            # Notify new owner via WebSocket
-            plain_title = decrypt_text(task.title) or "Task"
+            plain_title = decrypt_field(task.title_encrypted) or "Task"
             await connection_manager.send_personal_message(
                 {
                     "type": "task_ownership_transferred",
@@ -972,4 +973,3 @@ class TaskService:
             )
 
         await session.commit()
-                                                                              
