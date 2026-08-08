@@ -6,14 +6,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChannelCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=50, description="Channel title")
-    description: str | None = Field(None, max_length=250, description="Channel description")
-    avatar_url: str | None = Field(None, description="Channel avatar image URL")
+    # Expanded to VARCHAR(255) to support long/multilingual titles and emojis
+    name: str = Field(..., min_length=1, max_length=255, description="Channel title")
+    # Expanded to VARCHAR(500) for detailed channel onboarding and descriptions
+    description: str | None = Field(None, max_length=500, description="Channel description")
+    # Expanded to VARCHAR(500) to support long S3 presigned URLs & CDN paths
+    avatar_url: str | None = Field(None, max_length=500, description="Channel avatar image URL")
 
 class ChannelUpdate(BaseModel):
-    name: str | None = Field(None, min_length=1, max_length=50)
-    description: str | None = Field(None, max_length=250)
-    avatar_url: str | None = Field(None)
+    name: str | None = Field(None, min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=500)
+    avatar_url: str | None = Field(None, max_length=500)
 
 class ChannelMemberResponse(BaseModel):
     id: UUID

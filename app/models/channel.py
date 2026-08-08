@@ -24,9 +24,14 @@ class ChannelModel(Base):
     __tablename__ = "channels"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID, primary_key=True, default=uuid.uuid4)
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
-    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Expanded VARCHAR limits to prevent StringDataRightTruncationError:
+    # name: 255 chars for multi-lingual/emoji channel names
+    # description: 500 chars for comprehensive onboarding & guidelines
+    # avatar_url: 500 chars for CDN / S3 presigned URLs with tokens
+    # invite_code_hash: 255 chars for robust cryptographic hash representation
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_private: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     invite_code_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     owner_id: Mapped[uuid.UUID] = mapped_column(

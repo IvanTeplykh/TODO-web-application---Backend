@@ -161,3 +161,36 @@ async def test_channel_manual_username_invite_and_decline(async_client: AsyncCli
     )
     assert err_res.status_code == 404
 
+
+@pytest.mark.asyncio
+async def test_channel_expanded_varchar_limits(async_client: AsyncClient, authenticated_user: dict):
+    headers = authenticated_user["headers"]
+
+    # Test creating channel with 180+ character name and 400+ character description (exceeding legacy VARCHAR(100)/VARCHAR(250))
+    long_name = "Engineering & Infrastructure Team: Global Architecture, Real-Time WebSockets, and Distributed Systems Workspace [Alpha Division 2026]"
+    assert len(long_name) > 120
+
+    long_description = (
+        "This channel serves as the primary collaborative space for discussing distributed database migrations, "
+        "PostgreSQL schema evolution, real-time message indexing, and architectural scaling patterns across all teams. "
+        "Please follow community code guidelines and review RFC documents before submitting large pull requests."
+    )
+    assert len(long_description) > 250
+
+    long_avatar_url = "https://cdn.example.com/assets/images/workspaces/channels/enterprise/teams/engineering-architecture-banner-highres-2026-production-token-v2.png?version=3.4.1&format=webp&quality=90"
+
+    payload = {
+        "name": long_name,
+        "description": long_description,
+        "avatar_url": long_avatar_url,
+    }
+
+    create_res = await async_client.post("/api/v1/channels", json=payload, headers=headers)
+    assert create_res.status_code == 201
+    created_channel = create_res.json()
+
+    assert created_channel["name"] == long_name
+    assert created_channel["description"] == long_description
+    assert created_channel["avatar_url"] == long_avatar_url
+
+
