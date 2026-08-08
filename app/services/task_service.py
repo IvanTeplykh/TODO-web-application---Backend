@@ -63,7 +63,14 @@ class TaskService:
         session.add(history_entry)
 
     @staticmethod
-    async def _to_response(session: AsyncSession, task: TaskModel, current_user_id: UUID) -> TaskResponse:
+    async def _to_response(
+        session: AsyncSession,
+        task: TaskModel,
+        current_user_id: UUID,
+        read_status_map: dict[UUID, datetime] | None = None,
+        unread_map: dict[UUID, int] | None = None,
+        my_access_levels: dict[UUID, str] | None = None,
+    ) -> TaskResponse:
         plain_title = decrypt_field(task.title_encrypted) or ""
         plain_desc = decrypt_field(task.description_encrypted)
 
@@ -72,12 +79,22 @@ class TaskService:
         p_hash = compute_hmac_index(str(task.priority))
         c_hash = compute_hmac_index(str(task.completed))
 
-        u_stmt = select(UserModel.username).where(UserModel.id == task.owner_id)
-        u_res = await session.execute(u_stmt)
-        owner_name = u_res.scalar_one_or_none() or "Unknown"
+        from sqlalchemy.orm.attributes import instance_state
+        task_state = instance_state(task)
 
+        # 1. Owner name (use pre-loaded task.owner if available, fallback to single query only if not loaded)
+        if "owner" in task_state.dict and task.owner:
+            owner_name = task.owner.username
+        else:
+            u_stmt = select(UserModel.username).where(UserModel.id == task.owner_id)
+            u_res = await session.execute(u_stmt)
+            owner_name = u_res.scalar_one_or_none() or "Unknown"
+
+        # 2. My access level (use precomputed map if provided, else compute)
         if task.owner_id == current_user_id:
             my_access_level = "owner"
+        elif my_access_levels is not None:
+            my_access_level = my_access_levels.get(task.id, "status_only")
         else:
             collab_stmt = select(TaskCollaboratorModel.access_level).where(
                 and_(
@@ -89,45 +106,58 @@ class TaskService:
             raw_access = collab_res.scalar_one_or_none()
             my_access_level = _str(raw_access) if raw_access else "status_only"
 
-        collab_query = (
-            select(TaskCollaboratorModel)
-            .options(selectinload(TaskCollaboratorModel.user))
-            .where(TaskCollaboratorModel.task_id == task.id)
-            .order_by(TaskCollaboratorModel.created_at.asc())
-        )
-        collab_res = await session.execute(collab_query)
-        collab_models = collab_res.scalars().all()
+        # 3. Collaborators (use pre-loaded task.collaborators if loaded, fallback to query)
+        if "collaborators" in task_state.dict and task.collaborators is not None:
+            collab_models = sorted(task.collaborators, key=lambda c: c.created_at)
+        else:
+            collab_query = (
+                select(TaskCollaboratorModel)
+                .options(selectinload(TaskCollaboratorModel.user))
+                .where(TaskCollaboratorModel.task_id == task.id)
+                .order_by(TaskCollaboratorModel.created_at.asc())
+            )
+            collab_res = await session.execute(collab_query)
+            collab_models = collab_res.scalars().all()
 
         collab_responses = []
         for c in collab_models:
-            dec_avatar = decrypt_field(c.user.avatar_url) if (c.user and c.user.avatar_url) else None
+            c_state = instance_state(c)
+            user_obj = c.user if ("user" in c_state.dict and c.user) else None
+            dec_avatar = decrypt_field(user_obj.avatar_url) if (user_obj and user_obj.avatar_url) else None
             collab_responses.append(
                 TaskCollaboratorResponse(
                     id=c.id,
                     user_id=c.user_id,
-                    username=c.user.username if c.user else "Unknown",
+                    username=user_obj.username if user_obj else "Unknown",
                     avatar_url=dec_avatar,
                     access_level=_str(c.access_level),
                     created_at=c.created_at
                 )
             )
 
-        read_stmt = select(TaskReadStatusModel.last_read_at).where(
-            and_(TaskReadStatusModel.task_id == task.id, TaskReadStatusModel.user_id == current_user_id)
-        )
-        read_res = await session.execute(read_stmt)
-        last_read_at = read_res.scalar_one_or_none()
+        # 4. Unread comments count (use precomputed unread_map if provided, else execute single query)
+        if unread_map is not None:
+            unread_count = unread_map.get(task.id, 0)
+        else:
+            if read_status_map is not None:
+                last_read_at = read_status_map.get(task.id)
+            else:
+                read_stmt = select(TaskReadStatusModel.last_read_at).where(
+                    and_(TaskReadStatusModel.task_id == task.id, TaskReadStatusModel.user_id == current_user_id)
+                )
+                read_res = await session.execute(read_stmt)
+                last_read_at = read_res.scalar_one_or_none()
 
-        unread_conds = [
-            TaskCommentModel.task_id == task.id,
-            TaskCommentModel.user_id != current_user_id
-        ]
-        if last_read_at:
-            unread_conds.append(TaskCommentModel.created_at > last_read_at)
+            unread_conds = [
+                TaskCommentModel.task_id == task.id,
+                TaskCommentModel.user_id != current_user_id
+            ]
+            if last_read_at:
+                unread_conds.append(TaskCommentModel.created_at > last_read_at)
 
-        unread_stmt = select(func.count(TaskCommentModel.id)).where(and_(*unread_conds))
-        unread_res = await session.execute(unread_stmt)
-        unread_count = unread_res.scalar() or 0
+            unread_stmt = select(func.count(TaskCommentModel.id)).where(and_(*unread_conds))
+            unread_res = await session.execute(unread_stmt)
+            unread_count = unread_res.scalar() or 0
 
         return TaskResponse(
             id=task.id,
@@ -247,7 +277,10 @@ class TaskService:
         skip = (page - 1) * limit
         stmt = (
             select(TaskModel)
-            .options(selectinload(TaskModel.owner))
+            .options(
+                selectinload(TaskModel.owner),
+                selectinload(TaskModel.collaborators).selectinload(TaskCollaboratorModel.user)
+            )
             .where(and_(*conditions))
             .order_by(sort_expr)
             .offset(skip)
@@ -256,9 +289,72 @@ class TaskService:
         res = await session.execute(stmt)
         tasks = res.scalars().all()
 
+        task_ids = [t.id for t in tasks]
+        read_status_map: dict[UUID, datetime] = {}
+        unread_map: dict[UUID, int] = {}
+        my_access_levels: dict[UUID, str] = {}
+
+        if task_ids:
+            # 1. Pre-compute my_access_levels in ONE query
+            collab_stmt = select(TaskCollaboratorModel.task_id, TaskCollaboratorModel.access_level).where(
+                and_(
+                    TaskCollaboratorModel.task_id.in_(task_ids),
+                    TaskCollaboratorModel.user_id == owner_id
+                )
+            )
+            collab_res = await session.execute(collab_stmt)
+            for row in collab_res.all():
+                my_access_levels[row[0]] = _str(row[1])
+
+            # 2. Pre-compute read_status_map in ONE query
+            read_stmt = select(TaskReadStatusModel.task_id, TaskReadStatusModel.last_read_at).where(
+                and_(
+                    TaskReadStatusModel.task_id.in_(task_ids),
+                    TaskReadStatusModel.user_id == owner_id
+                )
+            )
+            read_res = await session.execute(read_stmt)
+            for row in read_res.all():
+                read_status_map[row[0]] = row[1]
+
+            # 3. Pre-compute unread_map in ONE GROUP BY query
+            unread_stmt = (
+                select(TaskCommentModel.task_id, func.count(TaskCommentModel.id))
+                .outerjoin(
+                    TaskReadStatusModel,
+                    and_(
+                        TaskReadStatusModel.task_id == TaskCommentModel.task_id,
+                        TaskReadStatusModel.user_id == owner_id
+                    )
+                )
+                .where(
+                    and_(
+                        TaskCommentModel.task_id.in_(task_ids),
+                        TaskCommentModel.user_id != owner_id,
+                        or_(
+                            TaskReadStatusModel.last_read_at.is_(None),
+                            TaskCommentModel.created_at > TaskReadStatusModel.last_read_at
+                        )
+                    )
+                )
+                .group_by(TaskCommentModel.task_id)
+            )
+            unread_res = await session.execute(unread_stmt)
+            for row in unread_res.all():
+                unread_map[row[0]] = row[1]
+
         items = []
         for t in tasks:
-            items.append(await TaskService._to_response(session, t, owner_id))
+            items.append(
+                await TaskService._to_response(
+                    session,
+                    t,
+                    owner_id,
+                    read_status_map=read_status_map,
+                    unread_map=unread_map,
+                    my_access_levels=my_access_levels
+                )
+            )
 
         total_pages = math.ceil(total / limit) if limit > 0 else 1
         return PaginatedResponse[TaskResponse](
@@ -271,7 +367,14 @@ class TaskService:
     @staticmethod
     async def get_task_by_id(session: AsyncSession, task_id: UUID, user_id: UUID = None, owner_id: UUID = None) -> TaskResponse:
         u_id = user_id or owner_id
-        stmt = select(TaskModel).where(TaskModel.id == task_id, TaskModel.deleted_at == None)
+        stmt = (
+            select(TaskModel)
+            .options(
+                selectinload(TaskModel.owner),
+                selectinload(TaskModel.collaborators).selectinload(TaskCollaboratorModel.user)
+            )
+            .where(TaskModel.id == task_id, TaskModel.deleted_at == None)
+        )
         res = await session.execute(stmt)
         task = res.scalar_one_or_none()
 
@@ -279,11 +382,7 @@ class TaskService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
         if task.owner_id != u_id:
-            collab_stmt = select(TaskCollaboratorModel).where(
-                and_(TaskCollaboratorModel.task_id == task_id, TaskCollaboratorModel.user_id == u_id)
-            )
-            collab_res = await session.execute(collab_stmt)
-            collab = collab_res.scalar_one_or_none()
+            collab = next((c for c in task.collaborators if c.user_id == u_id), None)
             if not collab:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
