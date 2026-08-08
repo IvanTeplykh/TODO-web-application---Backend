@@ -13,7 +13,7 @@ from app.core.security import (
     verify_password,
     verify_password_async,
 )
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, invalidate_user_cache
 from app.models.user import UserModel
 from app.schemas.user import (
     ChangePasswordRequest,
@@ -100,6 +100,7 @@ async def update_profile(
     user_db.updated_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(user_db)
+    invalidate_user_cache(current_user.id)
 
     await connection_manager.broadcast({
         "type": "user_profile_updated",
@@ -148,6 +149,7 @@ async def change_password(
     user_db.password_hash = await get_password_hash_async(data.new_password)
     user_db.updated_at = datetime.now(timezone.utc)
     await session.commit()
+    invalidate_user_cache(current_user.id)
 
     return {"message": "Password changed successfully"}
 
@@ -191,5 +193,6 @@ async def delete_account(
     await TaskService.reassign_tasks_before_user_deletion(session, current_user.id)
     user_db.deleted_at = datetime.now(timezone.utc)
     await session.commit()
+    invalidate_user_cache(current_user.id)
 
     return {"message": "Account deleted successfully"}

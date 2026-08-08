@@ -304,12 +304,13 @@ class TaskService:
         sort_col = allowed_sort_map.get(sort, TaskModel.created_at)
         sort_expr = asc(sort_col) if order == "asc" else desc(sort_col)
 
+        from sqlalchemy.orm import joinedload, selectinload
         skip = (page - 1) * limit
         stmt = (
             select(TaskModel)
             .options(
-                selectinload(TaskModel.owner),
-                selectinload(TaskModel.collaborators).selectinload(TaskCollaboratorModel.user)
+                joinedload(TaskModel.owner),
+                selectinload(TaskModel.collaborators).joinedload(TaskCollaboratorModel.user)
             )
             .where(and_(*conditions))
             .order_by(sort_expr)
@@ -317,37 +318,21 @@ class TaskService:
             .limit(limit)
         )
         res = await session.execute(stmt)
-        tasks = res.scalars().all()
+        tasks = res.scalars().unique().all()
 
         task_ids = [t.id for t in tasks]
-        read_status_map: dict[UUID, datetime] = {}
         unread_map: dict[UUID, int] = {}
         my_access_levels: dict[UUID, str] = {}
 
+        for t in tasks:
+            if t.owner_id == owner_id:
+                my_access_levels[t.id] = "owner"
+            else:
+                collab = next((c for c in t.collaborators if c.user_id == owner_id), None)
+                my_access_levels[t.id] = _str(collab.access_level) if collab else "status_only"
+
         if task_ids:
-            # 1. Pre-compute my_access_levels in ONE query
-            collab_stmt = select(TaskCollaboratorModel.task_id, TaskCollaboratorModel.access_level).where(
-                and_(
-                    TaskCollaboratorModel.task_id.in_(task_ids),
-                    TaskCollaboratorModel.user_id == owner_id
-                )
-            )
-            collab_res = await session.execute(collab_stmt)
-            for row in collab_res.all():
-                my_access_levels[row[0]] = _str(row[1])
-
-            # 2. Pre-compute read_status_map in ONE query
-            read_stmt = select(TaskReadStatusModel.task_id, TaskReadStatusModel.last_read_at).where(
-                and_(
-                    TaskReadStatusModel.task_id.in_(task_ids),
-                    TaskReadStatusModel.user_id == owner_id
-                )
-            )
-            read_res = await session.execute(read_stmt)
-            for row in read_res.all():
-                read_status_map[row[0]] = row[1]
-
-            # 3. Pre-compute unread_map in ONE GROUP BY query
+            # Single consolidated GROUP BY query for unread comments count
             unread_stmt = (
                 select(TaskCommentModel.task_id, func.count(TaskCommentModel.id))
                 .outerjoin(
@@ -381,7 +366,6 @@ class TaskService:
                     session,
                     t,
                     owner_id,
-                    read_status_map=read_status_map,
                     unread_map=unread_map,
                     my_access_levels=my_access_levels,
                     avatar_cache=avatar_cache
