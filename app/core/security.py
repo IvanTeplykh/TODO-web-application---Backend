@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -20,12 +21,27 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
             return False
 
 
+async def verify_password_async(plain_password: str, hashed_password: str) -> bool:
+    """Non-blocking password verification running in a separate thread pool."""
+    return await asyncio.to_thread(verify_password, plain_password, hashed_password)
+
+
 def get_password_hash(password: str) -> str:
     return ph.hash(password)
 
 
+async def get_password_hash_async(password: str) -> str:
+    """Non-blocking password hashing running in a separate thread pool."""
+    return await asyncio.to_thread(get_password_hash, password)
+
+
 def get_passcode_hash(passcode: str) -> str:
     return ph.hash(passcode)
+
+
+async def get_passcode_hash_async(passcode: str) -> str:
+    """Non-blocking passcode hashing running in a separate thread pool."""
+    return await asyncio.to_thread(get_passcode_hash, passcode)
 
 
 def verify_passcode(plain_passcode: str, hashed_passcode: str) -> bool:
@@ -33,6 +49,11 @@ def verify_passcode(plain_passcode: str, hashed_passcode: str) -> bool:
         return ph.verify(hashed_passcode, plain_passcode)
     except Exception:
         return False
+
+
+async def verify_passcode_async(plain_passcode: str, hashed_passcode: str) -> bool:
+    """Non-blocking passcode verification running in a separate thread pool."""
+    return await asyncio.to_thread(verify_passcode, plain_passcode, hashed_passcode)
 
 
 def create_access_token(subject: str | Any, expires_delta: timedelta = None) -> str:

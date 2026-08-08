@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.connection_manager import connection_manager
 from app.core.crypto import decrypt_field, encrypt_field
 from app.core.database import get_db
-from app.core.security import get_password_hash, verify_password
+from app.core.security import (
+    get_password_hash,
+    get_password_hash_async,
+    verify_password,
+    verify_password_async,
+)
 from app.dependencies.auth import get_current_user
 from app.models.user import UserModel
 from app.schemas.user import (
@@ -71,9 +76,27 @@ async def update_profile(
     if not user_db:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    user_db.username = profile_in.username.strip()
-    user_db.avatar_url = encrypt_field(profile_in.avatar_url) if profile_in.avatar_url else None
-    user_db.chat_retention_days = profile_in.chat_retention_days
+    if profile_in.username is not None and profile_in.username.strip() != user_db.username:
+        new_username = profile_in.username.strip()
+        u_stmt = select(UserModel).where(
+            UserModel.username.ilike(new_username),
+            UserModel.id != current_user.id,
+            UserModel.deleted_at == None
+        )
+        u_res = await session.execute(u_stmt)
+        if u_res.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already taken"
+            )
+        user_db.username = new_username
+
+    if profile_in.avatar_url is not None:
+        user_db.avatar_url = encrypt_field(profile_in.avatar_url) if profile_in.avatar_url else None
+
+    if profile_in.chat_retention_days is not None:
+        user_db.chat_retention_days = profile_in.chat_retention_days
+
     user_db.updated_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(user_db)
@@ -85,11 +108,14 @@ async def update_profile(
         "avatar_url": profile_in.avatar_url
     })
 
+    dec_email = decrypt_field(user_db.email_encrypted) or user_db.email_encrypted
+    dec_avatar = decrypt_field(user_db.avatar_url)
+
     return UserResponse(
         id=user_db.id,
         username=user_db.username,
-        email=decrypt_field(user_db.email_encrypted) or user_db.email_encrypted,
-        avatar_url=decrypt_field(user_db.avatar_url),
+        email=dec_email,
+        avatar_url=dec_avatar,
         chat_retention_days=user_db.chat_retention_days
     )
 
@@ -107,7 +133,7 @@ async def change_password(
     if not user_db:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    if not verify_password(data.current_password, user_db.password_hash):
+    if not await verify_password_async(data.current_password, user_db.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect current password"
@@ -119,7 +145,7 @@ async def change_password(
             detail="New password must be different from current password"
         )
 
-    user_db.password_hash = get_password_hash(data.new_password)
+    user_db.password_hash = await get_password_hash_async(data.new_password)
     user_db.updated_at = datetime.now(timezone.utc)
     await session.commit()
 
@@ -139,7 +165,7 @@ async def verify_user_password(
     if not user_db:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    is_valid = verify_password(data.password, user_db.password_hash)
+    is_valid = await verify_password_async(data.password, user_db.password_hash)
     return {"valid": is_valid}
 
 
@@ -156,7 +182,7 @@ async def delete_account(
     if not user_db:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    if not verify_password(data.password, user_db.password_hash):
+    if not await verify_password_async(data.password, user_db.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect password"

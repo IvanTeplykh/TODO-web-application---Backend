@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.crypto import compute_hmac_index, encrypt_field
-from app.core.security import create_access_token, get_password_hash, verify_password
+from app.core.security import create_access_token, get_password_hash_async, verify_password_async
 from app.models.user import UserModel
 from app.schemas.auth import LoginRequest, Token
 from app.schemas.user import UserCreate, UserRegisterResponse
@@ -45,7 +45,7 @@ class AuthService:
             )
 
         user_id = uuid.uuid4()
-        hashed_password = get_password_hash(user_in.password)
+        hashed_password = await get_password_hash_async(user_in.password)
         enc_email = encrypt_field(email_clean)
 
         new_user = UserModel(
@@ -70,7 +70,8 @@ class AuthService:
         res = await session.execute(stmt)
         user = res.scalar_one_or_none()
 
-        if not user or not verify_password(login_in.password, user.password_hash):
+        is_valid = await verify_password_async(login_in.password, user.password_hash) if user else False
+        if not user or not is_valid:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",

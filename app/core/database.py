@@ -41,12 +41,26 @@ class Database:
         if db_url.startswith("sqlite"):
             connect_args = {"check_same_thread": False}
 
+        engine_kwargs = {
+            "echo": False,
+            "future": True,
+            "connect_args": connect_args,
+        }
+
+        # Enable high-performance connection pooling for PostgreSQL (Railway/cloud deployment)
+        if not db_url.startswith("sqlite"):
+            engine_kwargs.update({
+                "pool_pre_ping": True,     # Proactively test connections to eliminate dead connection drops
+                "pool_size": 20,           # Keep pool of warm connections ready for instant reuse
+                "max_overflow": 20,        # Allow temporary burst traffic without queuing
+                "pool_recycle": 300,       # Recycle idle connections every 5 min to prevent proxy timeouts
+                "pool_timeout": 30,        # Timeout waiting for pool connection
+            })
+
         try:
             self.engine = create_async_engine(
                 db_url,
-                echo=False,
-                connect_args=connect_args,
-                future=True
+                **engine_kwargs
             )
         except Exception as e:
             print(f"[ERROR] Could not parse DATABASE_URL: {e}")
