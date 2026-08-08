@@ -70,6 +70,7 @@ class TaskService:
         read_status_map: dict[UUID, datetime] | None = None,
         unread_map: dict[UUID, int] | None = None,
         my_access_levels: dict[UUID, str] | None = None,
+        avatar_cache: dict[str, str | None] | None = None,
     ) -> TaskResponse:
         plain_title = decrypt_field(task.title_encrypted) or ""
         plain_desc = decrypt_field(task.description_encrypted)
@@ -123,7 +124,15 @@ class TaskService:
         for c in collab_models:
             c_state = instance_state(c)
             user_obj = c.user if ("user" in c_state.dict and c.user) else None
-            dec_avatar = decrypt_field(user_obj.avatar_url) if (user_obj and user_obj.avatar_url) else None
+            dec_avatar = None
+            if user_obj and user_obj.avatar_url:
+                if avatar_cache is not None:
+                    if user_obj.avatar_url not in avatar_cache:
+                        avatar_cache[user_obj.avatar_url] = decrypt_field(user_obj.avatar_url)
+                    dec_avatar = avatar_cache[user_obj.avatar_url]
+                else:
+                    dec_avatar = decrypt_field(user_obj.avatar_url)
+
             collab_responses.append(
                 TaskCollaboratorResponse(
                     id=c.id,
@@ -222,11 +231,48 @@ class TaskService:
         sort: str,
         order: str
     ) -> PaginatedResponse[TaskResponse]:
-        subq = select(TaskCollaboratorModel.task_id).where(TaskCollaboratorModel.user_id == owner_id)
-        conditions = [
-            TaskModel.deleted_at == None,
-            or_(TaskModel.owner_id == owner_id, TaskModel.id.in_(subq))
-        ]
+        # Pre-fetch collaborated task IDs to enable instant B-Tree index scans in PostgreSQL
+        if status_filter == "collaborator":
+            collab_ids_stmt = select(TaskCollaboratorModel.task_id).where(
+                and_(
+                    TaskCollaboratorModel.user_id == owner_id,
+                    TaskCollaboratorModel.access_level == "status_only"
+                )
+            )
+            collab_res = await session.execute(collab_ids_stmt)
+            collab_ids = collab_res.scalars().all()
+            conditions = [
+                TaskModel.deleted_at == None,
+                TaskModel.id.in_(collab_ids)
+            ]
+        elif status_filter == "co_owner":
+            co_ids_stmt = select(TaskCollaboratorModel.task_id).where(
+                and_(
+                    TaskCollaboratorModel.user_id == owner_id,
+                    TaskCollaboratorModel.access_level == "full_access"
+                )
+            )
+            co_res = await session.execute(co_ids_stmt)
+            co_ids = co_res.scalars().all()
+            conditions = [
+                TaskModel.deleted_at == None,
+                TaskModel.id.in_(co_ids)
+            ]
+        else:
+            all_collab_stmt = select(TaskCollaboratorModel.task_id).where(TaskCollaboratorModel.user_id == owner_id)
+            all_collab_res = await session.execute(all_collab_stmt)
+            collab_task_ids = all_collab_res.scalars().all()
+
+            if collab_task_ids:
+                conditions = [
+                    TaskModel.deleted_at == None,
+                    or_(TaskModel.owner_id == owner_id, TaskModel.id.in_(collab_task_ids))
+                ]
+            else:
+                conditions = [
+                    TaskModel.deleted_at == None,
+                    TaskModel.owner_id == owner_id
+                ]
 
         now = datetime.now(timezone.utc)
         if status_filter == "done":
@@ -236,22 +282,6 @@ class TaskService:
         elif status_filter == "overdue":
             conditions.append(TaskModel.completed.is_(False))
             conditions.append(and_(TaskModel.due_date.isnot(None), TaskModel.due_date < now))
-        elif status_filter == "collaborator":
-            collab_subq = select(TaskCollaboratorModel.task_id).where(
-                and_(
-                    TaskCollaboratorModel.user_id == owner_id,
-                    TaskCollaboratorModel.access_level == "status_only"
-                )
-            )
-            conditions.append(TaskModel.id.in_(collab_subq))
-        elif status_filter == "co_owner":
-            co_subq = select(TaskCollaboratorModel.task_id).where(
-                and_(
-                    TaskCollaboratorModel.user_id == owner_id,
-                    TaskCollaboratorModel.access_level == "full_access"
-                )
-            )
-            conditions.append(TaskModel.id.in_(co_subq))
 
         if search and search.strip():
             search_index = compute_hmac_index(search)
@@ -343,6 +373,7 @@ class TaskService:
             for row in unread_res.all():
                 unread_map[row[0]] = row[1]
 
+        avatar_cache: dict[str, str | None] = {}
         items = []
         for t in tasks:
             items.append(
@@ -352,7 +383,8 @@ class TaskService:
                     owner_id,
                     read_status_map=read_status_map,
                     unread_map=unread_map,
-                    my_access_levels=my_access_levels
+                    my_access_levels=my_access_levels,
+                    avatar_cache=avatar_cache
                 )
             )
 
